@@ -13,7 +13,7 @@ Main features:
 - Any CTC model as acoustic backbone
 """
 
-from .audio_frontend import (
+from .src.audio_frontend import (
     AudioFrontend,
     AudioSegment,
     SegmentationResult,
@@ -22,13 +22,38 @@ from .audio_frontend import (
     get_available_backends,
 )
 
+from .src.text_frontend import (
+    TextFrontend,
+    CharTokenizer,
+    load_text,
+    normalize_text,
+    load_text_from_file,
+    load_text_from_url,
+    load_text_from_pdf,
+    romanize_text,
+    preprocess_cjk,
+    get_available_text_backends,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
+    # Audio frontend
     "AudioFrontend",
     "AudioSegment",
     "SegmentationResult",
     "segment_audio",
     "load_audio",
     "get_available_backends",
+    # Text frontend
+    "TextFrontend",
+    "CharTokenizer",
+    "load_text",
+    "normalize_text",
+    "load_text_from_file",
+    "load_text_from_url",
+    "load_text_from_pdf",
+    "romanize_text",
+    "preprocess_cjk",
+    "get_available_text_backends",
 ]
