@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torchaudio-aligner"
+version = "0.1.0"
+description = "Long-form fuzzy speech-to-text alignment for 1000+ languages"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Ruizhe Huang", email = "huangruizhe@meta.com"},
+]
+keywords = [
+    "speech-to-text",
+    "forced-alignment",
+    "audio",
+    "speech",
+    "ctc",
+    "wfst",
+    "multilingual",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+]
+
+[project.optional-dependencies]
+# For torchaudio >= 2.8
+torchcodec = ["torchcodec>=0.1.0"]
+
+# Fallback audio loading
+soundfile = ["soundfile>=0.12.0"]
+
+# Full installation with all optional dependencies
+all = [
+    "torchcodec>=0.1.0",
+    "soundfile>=0.12.0",
+]
+
+# Development dependencies
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/huangruizhe/torchaudio-aligner"
+Documentation = "https://github.com/huangruizhe/torchaudio-aligner"
+Repository = "https://github.com/huangruizhe/torchaudio-aligner"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["torchaudio_aligner*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N"]
+ignore = ["E501"]  # Line too long (handled by black)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

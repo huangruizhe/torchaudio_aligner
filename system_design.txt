@@ -1,0 +1,28 @@
+        ┌───────────────────────────────────────────┐            ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+        │ Audio front end (e.g., denoise, normalize)│            │   Labeling utils                                                                                                              │
+Audio ->│                  e.g. demucs              │-> Audio' ->│  ( 1. Feed audio' in to neural network to get frame-wise labels, e.g., ctc or rnnt. E.g., WAV2VEC,MMS,nemo model,omniASR etc) │
+        │              e.g., uniform segmetnation   │            │    2. We actually generate either frame-wise posterior, or nbest list here                                                    │
+        └───────────────────────────────────────────┘            └──────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────┘
+                                                                                                                                │                                                                 
+        ┌───────────────────────────────────────────┐            ┌──────────────────────────────────────────────────────────────▼────────────────────────────────────────────────────────────────┐
+Text  ->│ Text frontend (normalization, romanization│            │   Alignment utility, which gets timestamp for the input Text' in Audio' segments. It can do basically flexible/forced align-  │
+        │  tokenization, cleanup, etc)              │-> Text'  ->│    ment, or even use ASR model/Whisper to transcribe while getting timestamps. The output is timestamped segments and texts   │
+        │                                           │            │   Given: audio + text, output: alignment (timestamps) for short segments.  We can even use MFA here, the only matter is format│
+        └───────────────────────────────────────────┘            └──────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────┘
+                                                                                                                                │                                                                 
+                                                                                                                                ▼                                                                 
+                                                                                      ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐         
+                                                                                      │  Stitching utils: there are several options:                                                    │         
+                                                                                      │    1. Use edit distance to compute aligment between the raw alignent and provided transcription │         
+                                                                                      │    2. Use diff tool as gentle aligner                                                           │         
+                                                                                      │    3. Use LIS as in this project                                                                │         
+                                                                                      └─────────────────────────────────────────┬───────────────────────────────────────────────────────┘         
+                                                                                                                                │                                                                 
+                                                                                                                                ▼                                                                 
+                                                                                                                Alignment results for long-form data                                              
+                                                                                                                                │                                                                 
+                                                                                                                                ▼                                                                 
+                                                                                                 ┌─────────────────────────┐ ┌──────────────────────┐ ┌───────────────────┐                       
+                                                                                                 │ Visualization utils     │ │ Voting and Fusion    │ │  Etc              │                       
+                                                                                                 │                         │ │                      │ │                   │                       
+                                                                                                 └─────────────────────────┘ └──────────────────────┘ └───────────────────┘                       
