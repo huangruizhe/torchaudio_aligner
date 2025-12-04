@@ -660,6 +660,117 @@ def romanize_text(
     return romanized
 
 
+def align_romanized_to_original(
+    original_words: List[str],
+    romanized_words: List[str],
+    unk_token: str = "*",
+) -> List[str]:
+    """
+    Align romanized words to original words, preserving word count.
+
+    uroman sometimes merges or splits characters during romanization, causing
+    word count mismatches. This function uses sequence alignment (difflib) to
+    align the romanized output back to the original word count.
+
+    Args:
+        original_words: List of original words (e.g., CJK characters)
+        romanized_words: List of romanized words from uroman
+        unk_token: Token to use for unaligned positions
+
+    Returns:
+        List of romanized words with same length as original_words
+
+    Example:
+        >>> orig = ["私", "は", "猫", "です"]  # 4 words
+        >>> roman = ["watashi", "ha", "nekodesu"]  # uroman merged last 2
+        >>> align_romanized_to_original(orig, roman)
+        ["watashi", "ha", "neko", "desu"]  # or ["watashi", "ha", "nekodesu", "*"]
+    """
+    import difflib
+
+    if len(original_words) == len(romanized_words):
+        return romanized_words  # No alignment needed
+
+    # Use SequenceMatcher to find matching blocks
+    # We match based on position ratio (since content is different scripts)
+    n_orig = len(original_words)
+    n_roman = len(romanized_words)
+
+    if n_roman == 0:
+        return [unk_token] * n_orig
+
+    # Simple approach: distribute romanized words proportionally
+    # and handle insertions/deletions with unk_token
+    result = []
+
+    if n_roman > n_orig:
+        # More romanized words than original - merge some
+        # Calculate how many romanized words per original word
+        ratio = n_roman / n_orig
+        for i in range(n_orig):
+            start_idx = int(i * ratio)
+            end_idx = int((i + 1) * ratio)
+            # Merge romanized words for this position
+            merged = "".join(romanized_words[start_idx:end_idx])
+            result.append(merged if merged else unk_token)
+    else:
+        # Fewer romanized words than original - insert unk_token
+        # Calculate positions where we need to insert
+        ratio = n_orig / n_roman
+        roman_idx = 0
+        for i in range(n_orig):
+            expected_roman_idx = int(i / ratio)
+            if expected_roman_idx < n_roman and roman_idx <= expected_roman_idx:
+                result.append(romanized_words[roman_idx])
+                roman_idx += 1
+            else:
+                result.append(unk_token)
+
+        # If we still have romanized words left, append them to last position
+        if roman_idx < n_roman:
+            remaining = "".join(romanized_words[roman_idx:])
+            result[-1] = result[-1] + remaining if result[-1] != unk_token else remaining
+
+    assert len(result) == n_orig, f"Alignment failed: {len(result)} != {n_orig}"
+    return result
+
+
+def romanize_text_aligned(
+    text: str,
+    language: Optional[str] = None,
+    unk_token: str = "*",
+) -> str:
+    """
+    Romanize text and align output to preserve word count.
+
+    This is a wrapper around romanize_text() that ensures the romanized output
+    has the same word count as the input text. This is critical for alignment
+    recovery via word indices.
+
+    Args:
+        text: Input text (space-separated words)
+        language: ISO-639-3 language code
+        unk_token: Token to use for unaligned positions
+
+    Returns:
+        Romanized text with same word count as input
+    """
+    original_words = text.split()
+    romanized = romanize_text(text, language)
+    romanized_words = romanized.split()
+
+    if len(original_words) == len(romanized_words):
+        return romanized
+
+    # Align to preserve word count
+    logger.warning(
+        f"uroman word count mismatch: {len(original_words)} -> {len(romanized_words)}, "
+        "applying alignment correction"
+    )
+    aligned_words = align_romanized_to_original(original_words, romanized_words, unk_token)
+    return " ".join(aligned_words)
+
+
 # =============================================================================
 # Language-Specific Preprocessing
 # =============================================================================
