@@ -22,6 +22,16 @@ uroman-python>=1.2.0
 # CJK text processing
 zhon>=2.0.0
 
+# Text Normalization (TN) - numbers to spoken form
+num2words>=0.5.0
+
+# Tokenizers
+# BPE tokenizer (SentencePiece)
+sentencepiece>=0.2.0
+# Phoneme tokenizer (English)
+cmudict>=1.0.0
+g2p_en>=2.1.0
+
 # WFST operations (required for alignment)
 # Note: k2 requires specific version matching your PyTorch/CUDA version
 # See: https://k2-fsa.github.io/k2/installation.html
