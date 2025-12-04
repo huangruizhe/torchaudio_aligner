@@ -83,6 +83,29 @@ _WhisperNormalizer = None
 _NEMO_AVAILABLE = False
 _NemoNormalizer = None
 
+# Optional: OCR for scanned PDFs
+_OCR_AVAILABLE = False
+_PDF2IMAGE_AVAILABLE = False
+try:
+    import easyocr
+    _OCR_AVAILABLE = True
+except ImportError:
+    easyocr = None
+
+try:
+    from pdf2image import convert_from_path
+    _PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    convert_from_path = None
+
+# Optional: Japanese morphological analysis with cutlet
+_CUTLET_AVAILABLE = False
+try:
+    import cutlet
+    _CUTLET_AVAILABLE = True
+except ImportError:
+    cutlet = None
+
 
 def get_available_text_backends() -> dict:
     """Return availability of optional text processing backends."""
@@ -95,6 +118,9 @@ def get_available_text_backends() -> dict:
         "wetext": _WETEXT_AVAILABLE,
         "whisper_normalizer": _WHISPER_NORMALIZER_AVAILABLE,  # placeholder
         "nemo_text_processing": _NEMO_AVAILABLE,  # placeholder
+        "ocr": _OCR_AVAILABLE,
+        "pdf2image": _PDF2IMAGE_AVAILABLE,
+        "cutlet": _CUTLET_AVAILABLE,
     }
 
 
@@ -183,6 +209,87 @@ def load_text_from_pdf(pdf_path: Union[str, Path]) -> str:
     text = " ".join(text_parts)
 
     logger.info(f"Extracted {len(text)} characters, {len(text.split())} words from {len(reader.pages)} pages")
+    return text
+
+
+def load_text_from_pdf_ocr(
+    pdf_path: Union[str, Path],
+    languages: List[str] = None,
+    dpi: int = 300,
+    fallback_to_text: bool = True,
+) -> str:
+    """
+    Extract text from a scanned/image-based PDF using OCR.
+
+    This is useful for PDFs that contain scanned images instead of text
+    (common for Hindi, historical documents, etc.).
+
+    Requires: pip install easyocr pdf2image
+    Also requires poppler-utils system package for pdf2image.
+
+    Args:
+        pdf_path: Path to PDF file
+        languages: List of language codes for EasyOCR (e.g., ['en'], ['hi', 'en'])
+            Default: ['en']
+        dpi: Resolution for PDF to image conversion (higher = better quality but slower)
+        fallback_to_text: If True, try text extraction first, use OCR only if empty
+
+    Returns:
+        Extracted text content
+
+    Example:
+        >>> # For Hindi scanned PDF
+        >>> text = load_text_from_pdf_ocr("hindi_document.pdf", languages=['hi', 'en'])
+
+        >>> # For English scanned PDF
+        >>> text = load_text_from_pdf_ocr("scanned_book.pdf", languages=['en'])
+    """
+    if not _PDF2IMAGE_AVAILABLE:
+        raise ImportError(
+            "pdf2image is required for OCR. Install with: pip install pdf2image\n"
+            "Also install poppler-utils: brew install poppler (macOS) or apt install poppler-utils (Linux)"
+        )
+    if not _OCR_AVAILABLE:
+        raise ImportError("easyocr is required for OCR. Install with: pip install easyocr")
+
+    pdf_path = Path(pdf_path)
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+    languages = languages or ['en']
+
+    # Try text extraction first if fallback enabled
+    if fallback_to_text:
+        try:
+            text = load_text_from_pdf(pdf_path)
+            # Check if we got meaningful text (not just whitespace/noise)
+            if len(text.strip()) > 100 and len(text.split()) > 20:
+                logger.info("PDF contains extractable text, skipping OCR")
+                return text
+        except Exception:
+            pass
+        logger.info("PDF appears to be scanned/image-based, using OCR")
+
+    logger.info(f"Converting PDF to images (dpi={dpi}): {pdf_path}")
+    images = convert_from_path(str(pdf_path), dpi=dpi)
+    logger.info(f"Converted {len(images)} pages to images")
+
+    # Initialize EasyOCR reader
+    logger.info(f"Initializing EasyOCR with languages: {languages}")
+    reader = easyocr.Reader(languages, gpu=False)  # CPU by default for compatibility
+
+    text_parts = []
+    for i, image in enumerate(images):
+        logger.info(f"OCR processing page {i+1}/{len(images)}")
+        # EasyOCR expects numpy array or file path
+        import numpy as np
+        image_np = np.array(image)
+        results = reader.readtext(image_np, detail=0)  # detail=0 returns text only
+        page_text = " ".join(results)
+        text_parts.append(page_text)
+
+    text = " ".join(text_parts)
+    logger.info(f"OCR extracted {len(text)} characters, {len(text.split())} words from {len(images)} pages")
     return text
 
 
@@ -771,6 +878,99 @@ def romanize_text_aligned(
     return " ".join(aligned_words)
 
 
+def romanize_japanese_morphemes(
+    text: str,
+    system: str = "hepburn",
+    use_foreign_spelling: bool = False,
+) -> str:
+    """
+    Romanize Japanese text using morphological analysis with cutlet.
+
+    This provides higher quality romanization than uroman by:
+    1. Performing morphological analysis (word segmentation)
+    2. Using proper readings for kanji based on context
+    3. Following standard romanization systems (Hepburn, Kunrei, etc.)
+
+    Requires: pip install cutlet
+
+    Args:
+        text: Japanese text to romanize
+        system: Romanization system - "hepburn" (default), "kunrei", "nihon"
+        use_foreign_spelling: If True, keep foreign words in original spelling
+
+    Returns:
+        Romanized text (space-separated morphemes)
+
+    Example:
+        >>> romanize_japanese_morphemes("風立ちぬ、いざ生きめやも")
+        "kaze tachinu, iza ikime ya mo"
+
+        >>> romanize_japanese_morphemes("東京は日本の首都です")
+        "toukyou wa nihon no shuto desu"
+    """
+    if not _CUTLET_AVAILABLE:
+        raise ImportError(
+            "cutlet is required for Japanese morphological romanization. "
+            "Install with: pip install cutlet\n"
+            "Note: cutlet requires fugashi and unidic, which will be installed automatically."
+        )
+
+    logger.info(f"Romanizing Japanese with cutlet (system={system})")
+
+    # Initialize cutlet with specified romanization system
+    katsu = cutlet.Cutlet(system)
+    katsu.use_foreign_spelling = use_foreign_spelling
+
+    # Romanize the text
+    romanized = katsu.romaji(text)
+
+    logger.info(f"Romanized {len(text)} chars to {len(romanized)} chars")
+    return romanized
+
+
+def romanize_japanese_morphemes_aligned(
+    text: str,
+    system: str = "hepburn",
+    unk_token: str = "*",
+) -> str:
+    """
+    Romanize Japanese text with word count preservation.
+
+    This combines cutlet's morphological analysis with alignment correction
+    to ensure the output has the same word count as the input.
+
+    Args:
+        text: Japanese text (space-separated, e.g., from preprocess_cjk)
+        system: Romanization system
+        unk_token: Token for unaligned positions
+
+    Returns:
+        Romanized text with same word count as input
+    """
+    if not _CUTLET_AVAILABLE:
+        # Fallback to uroman if cutlet not available
+        logger.warning("cutlet not available, falling back to uroman for Japanese")
+        return romanize_text_aligned(text, language="jpn", unk_token=unk_token)
+
+    original_words = text.split()
+
+    # Romanize each character/word separately to preserve count
+    romanized_words = []
+    katsu = cutlet.Cutlet(system)
+
+    for word in original_words:
+        try:
+            rom = katsu.romaji(word).strip()
+            romanized_words.append(rom if rom else unk_token)
+        except Exception:
+            romanized_words.append(unk_token)
+
+    assert len(romanized_words) == len(original_words), \
+        f"Word count mismatch: {len(romanized_words)} != {len(original_words)}"
+
+    return " ".join(romanized_words)
+
+
 # =============================================================================
 # Language-Specific Preprocessing
 # =============================================================================
@@ -1348,3 +1548,218 @@ def normalize_text(
         expand_numbers=expand_numbers,
         tn_language=tn_language,
     )
+
+
+# =============================================================================
+# One-Liner Convenience Function for Alignment
+# =============================================================================
+
+@dataclass
+class PreparedText:
+    """Result of prepare_for_alignment()."""
+    original_text: str          # Raw text as loaded
+    normalized_text: str        # Normalized text (word count preserved!)
+    original_words: List[str]   # Original words (for recovery)
+    normalized_words: List[str] # Normalized words (for alignment)
+    word_count: int             # Number of words
+    tokens: Optional[List[List[int]]] = None  # Token IDs if tokenizer provided
+
+    def recover_original(self, word_indices: List[int]) -> List[str]:
+        """
+        Recover original words from alignment word indices.
+
+        Args:
+            word_indices: List of word indices from alignment output
+
+        Returns:
+            List of original words at those indices
+        """
+        return [self.original_words[i] for i in word_indices if i < len(self.original_words)]
+
+
+def prepare_for_alignment(
+    source: Union[str, Path],
+    language: str = "eng",
+    tokenizer: Optional[Union[CharTokenizer, BPETokenizer, PhonemeTokenizer]] = None,
+    expand_numbers: bool = True,
+    use_ocr: bool = False,
+    ocr_languages: List[str] = None,
+) -> PreparedText:
+    """
+    One-liner to prepare text for forced alignment.
+
+    This is the main convenience function that combines:
+    1. Loading text from file/URL/PDF (with optional OCR)
+    2. Language-specific preprocessing (CJK split, romanization)
+    3. Text normalization (TN for numbers, MMS normalization)
+    4. Optional tokenization
+
+    The key invariant is preserved: word count stays the same through all transforms,
+    enabling lossless recovery of original words via word indices.
+
+    Args:
+        source: Path to file, URL, or PDF
+        language: Language code. Supported formats:
+            - ISO 639-3: "eng", "cmn", "jpn", "hin", "kor", "tgl", "por"
+            - ISO 639-1: "en", "zh", "ja", "hi", "ko", "tl", "pt"
+            - Special: "zhuang" or "za" for Zhuang
+        tokenizer: Optional tokenizer (CharTokenizer, BPETokenizer, or PhonemeTokenizer)
+        expand_numbers: Expand numbers to spoken form (e.g., "$123" -> "onehundredtwentythreedollars")
+        use_ocr: Use OCR for scanned PDFs (requires easyocr, pdf2image)
+        ocr_languages: Language codes for OCR (e.g., ['hi', 'en'] for Hindi)
+
+    Returns:
+        PreparedText object with:
+            - original_text: Raw loaded text
+            - normalized_text: Alignment-ready text
+            - original_words: List of original words
+            - normalized_words: List of normalized words
+            - word_count: Number of words (same for original and normalized!)
+            - tokens: Token IDs if tokenizer provided
+
+    Example:
+        >>> from torchaudio_aligner import prepare_for_alignment
+        >>>
+        >>> # English PDF
+        >>> result = prepare_for_alignment("transcript.pdf", language="en")
+        >>> print(f"Loaded {result.word_count} words")
+        >>>
+        >>> # Chinese text with romanization
+        >>> result = prepare_for_alignment("chinese.txt", language="cmn")
+        >>>
+        >>> # Japanese with cutlet morphological analysis
+        >>> result = prepare_for_alignment("japanese.txt", language="jpn")
+        >>>
+        >>> # Hindi scanned PDF with OCR
+        >>> result = prepare_for_alignment("hindi.pdf", language="hi", use_ocr=True)
+        >>>
+        >>> # With tokenizer for immediate alignment
+        >>> tokenizer = create_tokenizer("char", token2id=mms_vocab)
+        >>> result = prepare_for_alignment("audio.txt", tokenizer=tokenizer)
+        >>> # result.tokens is ready for alignment!
+    """
+    # Normalize language code
+    lang_map = {
+        # ISO 639-1 to ISO 639-3
+        "en": "eng", "zh": "cmn", "ja": "jpn", "hi": "hin",
+        "ko": "kor", "tl": "tgl", "pt": "por", "de": "deu",
+        "fr": "fra", "es": "spa", "ru": "rus", "ar": "ara",
+        # Special cases
+        "zhuang": None, "za": None,  # Latin script, no romanization needed
+    }
+
+    # Determine processing flags based on language
+    lang_code = lang_map.get(language, language)  # ISO 639-3 code for uroman
+    is_cjk = language in ("cmn", "zh", "jpn", "ja", "kor", "ko")
+    is_japanese = language in ("jpn", "ja")
+    needs_romanization = lang_code is not None and language not in ("eng", "en", "zhuang", "za")
+
+    # TN language (num2words uses ISO 639-1)
+    tn_lang_map = {"eng": "en", "cmn": "zh", "jpn": "ja", "deu": "de", "fra": "fr", "por": "pt"}
+    tn_language = tn_lang_map.get(lang_code, "en")
+
+    # Step 1: Load text
+    source_str = str(source)
+    if use_ocr and source_str.lower().endswith(".pdf"):
+        original_text = load_text_from_pdf_ocr(source, languages=ocr_languages or [tn_language])
+    elif source_str.startswith(("http://", "https://")):
+        original_text = load_text_from_url(source_str)
+    elif source_str.lower().endswith(".pdf"):
+        original_text = load_text_from_pdf(source)
+    else:
+        original_text = load_text_from_file(source)
+
+    # Clean up whitespace
+    original_text = " ".join(original_text.split())
+
+    # Step 2: Preprocess
+    processed_text = original_text
+
+    # CJK: split into individual characters
+    if is_cjk:
+        processed_text = preprocess_cjk(processed_text)
+
+    # Store original words (after CJK split if applicable)
+    original_words = processed_text.split()
+
+    # Step 3: Romanize (for non-Latin scripts)
+    if needs_romanization:
+        if is_japanese and _CUTLET_AVAILABLE:
+            # Use cutlet for better Japanese romanization
+            processed_text = romanize_japanese_morphemes_aligned(processed_text)
+        else:
+            # Use uroman with alignment correction
+            processed_text = romanize_text_aligned(processed_text, language=lang_code)
+
+    # Step 4: Text Normalization (expand numbers)
+    if expand_numbers:
+        processed_text = apply_text_normalization(processed_text, language=tn_language, word_joiner="")
+
+    # Step 5: MMS normalization (final cleanup)
+    normalized_text = normalize_for_mms(processed_text, expand_numbers=False)  # Already expanded
+    normalized_words = normalized_text.split()
+
+    # Verify word count preservation (critical invariant!)
+    assert len(original_words) == len(normalized_words), (
+        f"Word count changed! original={len(original_words)}, normalized={len(normalized_words)}. "
+        "This is a bug in the text frontend."
+    )
+
+    # Step 6: Tokenize (optional)
+    tokens = None
+    if tokenizer is not None:
+        tokens = tokenizer.encode(normalized_text)
+
+    return PreparedText(
+        original_text=original_text,
+        normalized_text=normalized_text,
+        original_words=original_words,
+        normalized_words=normalized_words,
+        word_count=len(original_words),
+        tokens=tokens,
+    )
+
+
+# =============================================================================
+# Quick Start Examples (for documentation)
+# =============================================================================
+
+def _example_usage():
+    """
+    Example usage of torchaudio_aligner text frontend.
+
+    This function is for documentation only and is not meant to be called.
+    """
+    # Example 1: Simple English text
+    result = prepare_for_alignment("transcript.txt", language="en")
+    print(f"Loaded {result.word_count} words")
+    print(f"Normalized: {result.normalized_text[:100]}...")
+
+    # Example 2: Chinese text (will be CJK-split and romanized)
+    result = prepare_for_alignment("chinese.pdf", language="cmn")
+    print(f"Chinese: {result.word_count} characters")
+
+    # Example 3: Japanese with morphological analysis
+    result = prepare_for_alignment("japanese.txt", language="jpn")
+    print(f"Japanese: {result.word_count} morphemes")
+
+    # Example 4: Hindi scanned PDF with OCR
+    result = prepare_for_alignment(
+        "hindi_scanned.pdf",
+        language="hi",
+        use_ocr=True,
+        ocr_languages=["hi", "en"]
+    )
+    print(f"Hindi (OCR): {result.word_count} words")
+
+    # Example 5: With tokenizer for immediate alignment
+    mms_vocab = {c: i for i, c in enumerate("abcdefghijklmnopqrstuvwxyz'-*")}
+    tokenizer = create_tokenizer("char", token2id=mms_vocab, blank_token="-", unk_token="*")
+    result = prepare_for_alignment("audio_transcript.txt", tokenizer=tokenizer)
+    print(f"Tokens ready: {len(result.tokens)} word groups")
+
+    # Example 6: Recover original words after alignment
+    # Suppose alignment gives us word indices [0, 5, 10, 15]
+    aligned_indices = [0, 5, 10, 15]
+    original_words = result.recover_original(aligned_indices)
+    print(f"Aligned words: {original_words}")

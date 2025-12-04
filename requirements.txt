@@ -32,6 +32,42 @@ sentencepiece>=0.2.0
 cmudict>=1.0.0
 g2p_en>=2.1.0
 
+# ============================================
+# Optional dependencies (install as needed)
+# ============================================
+
+# OCR for scanned PDFs (e.g., Hindi documents)
+# pip install easyocr pdf2image
+# Also requires: brew install poppler (macOS) or apt install poppler-utils (Linux)
+# easyocr>=1.7.0
+# pdf2image>=1.16.0
+
+# Japanese morphological romanization (higher quality than uroman)
+# pip install cutlet
+# Note: cutlet will install fugashi and unidic automatically
+# cutlet>=0.4.0
+
+# Audio enhancement (denoising, voice extraction, VAD)
+# Silero VAD: Voice Activity Detection (loaded via torch.hub, no extra install needed)
+#
+# Option 1: Demucs - Source separation to extract vocals from noisy audio
+# pip install demucs pyloudnorm
+# demucs>=4.0.0
+# pyloudnorm>=0.1.0
+#
+# Option 2: noisereduce - Spectral gating noise reduction (lightweight, CPU-friendly)
+# pip install noisereduce
+# noisereduce>=3.0.0
+#
+# Option 3: DeepFilterNet - Deep learning noise suppression (48kHz full-band)
+# pip install deepfilternet
+# deepfilternet>=0.5.0
+#
+# Option 4: Resemble Enhance - AI speech denoising & enhancement (highest quality)
+# pip install resemble-enhance
+# Note: Heavy model (~1GB), best with GPU
+# resemble-enhance>=0.0.1
+
 # WFST operations (required for alignment)
 # Note: k2 requires specific version matching your PyTorch/CUDA version
 # See: https://k2-fsa.github.io/k2/installation.html
