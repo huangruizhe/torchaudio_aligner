@@ -316,6 +316,33 @@ class HuggingFaceCTCBackend(CTCModelBackend):
 
         return results
 
+    def decode_tokens(self, token_ids: List[int]) -> str:
+        """
+        Decode token IDs to text using the HuggingFace tokenizer.
+
+        Handles character-based vocabularies (MMS, Wav2Vec2) where
+        '|' represents word boundaries.
+        """
+        if not self._loaded:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        # Use the processor's tokenizer decode method
+        # This properly handles special tokens and word boundaries
+        try:
+            # The tokenizer.decode expects token IDs
+            text = self._processor.tokenizer.decode(token_ids)
+            # Clean up: replace word boundary token with space
+            text = text.replace("|", " ")
+            # Remove extra spaces
+            text = " ".join(text.split())
+            return text
+        except Exception:
+            # Fallback to manual decoding
+            vocab = self.get_vocab_info()
+            tokens = [vocab.id_to_label.get(idx, "") for idx in token_ids]
+            text = "".join(t if t != "|" else " " for t in tokens)
+            return " ".join(text.split())
+
     def supports_language(self, language: str) -> bool:
         """Check if language is supported."""
         if not self._is_mms_model(self.config.model_name):
