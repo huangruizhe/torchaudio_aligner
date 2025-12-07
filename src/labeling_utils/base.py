@@ -196,6 +196,63 @@ class CTCModelBackend(ABC):
             results.append(emissions.squeeze(0))
         return results
 
+    def decode_tokens(self, token_ids: List[int]) -> str:
+        """
+        Decode a sequence of token IDs to text.
+
+        This uses the model's tokenizer to properly convert token IDs
+        back to text, handling BPE, word boundaries, etc.
+
+        Args:
+            token_ids: List of token IDs (after CTC collapse, blanks removed)
+
+        Returns:
+            Decoded text string
+        """
+        # Default implementation: join labels from vocab_info
+        if not self._loaded:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        vocab = self.get_vocab_info()
+        tokens = [vocab.id_to_label.get(idx, "") for idx in token_ids]
+        # Simple join - subclasses should override for proper tokenizer decode
+        return "".join(tokens)
+
+    def greedy_decode(self, emissions: torch.Tensor) -> str:
+        """
+        Perform greedy CTC decoding on emissions.
+
+        Takes argmax at each frame, collapses repeats, removes blanks,
+        then uses the tokenizer to decode to text.
+
+        Args:
+            emissions: Log posteriors of shape (frames, vocab_size)
+
+        Returns:
+            Decoded text string
+        """
+        if not self._loaded:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        vocab = self.get_vocab_info()
+
+        # Get most likely token at each frame
+        indices = emissions.argmax(dim=-1).tolist()
+
+        # Collapse consecutive duplicates
+        collapsed = []
+        prev = None
+        for idx in indices:
+            if idx != prev:
+                collapsed.append(idx)
+                prev = idx
+
+        # Remove blanks
+        token_ids = [idx for idx in collapsed if idx != vocab.blank_id]
+
+        # Use tokenizer to decode
+        return self.decode_tokens(token_ids)
+
     def supports_language(self, language: str) -> bool:
         """
         Check if the model supports a specific language.

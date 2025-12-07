@@ -134,6 +134,58 @@ _MODEL_PRESETS: Dict[str, ModelConfig] = {
         model_name="HUBERT_ASR_XLARGE",
         backend="torchaudio",
     ),
+
+    # ==========================================================================
+    # NeMo Models (NVIDIA)
+    # ==========================================================================
+    "nemo-conformer": ModelConfig(
+        model_name="nvidia/stt_en_conformer_ctc_large",
+        backend="nemo",
+    ),
+    "nemo-conformer-large": ModelConfig(
+        model_name="nvidia/stt_en_conformer_ctc_large",
+        backend="nemo",
+    ),
+    "nemo-conformer-small": ModelConfig(
+        model_name="nvidia/stt_en_conformer_ctc_small",
+        backend="nemo",
+    ),
+    "nemo-fastconformer": ModelConfig(
+        model_name="nvidia/stt_en_fastconformer_hybrid_large_pc",
+        backend="nemo",
+    ),
+    "nemo-quartznet": ModelConfig(
+        model_name="nvidia/stt_en_quartznet15x5",
+        backend="nemo",
+    ),
+    "nemo-citrinet": ModelConfig(
+        model_name="nvidia/stt_en_citrinet_1024",
+        backend="nemo",
+    ),
+
+    # ==========================================================================
+    # OmniASR Models (Facebook/Meta - 1600+ languages)
+    # ==========================================================================
+    "omniasr": ModelConfig(
+        model_name="omniASR_CTC_1B",
+        backend="omniasr",
+    ),
+    "omniasr-300m": ModelConfig(
+        model_name="omniASR_CTC_300M",
+        backend="omniasr",
+    ),
+    "omniasr-1b": ModelConfig(
+        model_name="omniASR_CTC_1B",
+        backend="omniasr",
+    ),
+    "omniasr-3b": ModelConfig(
+        model_name="omniASR_CTC_3B",
+        backend="omniasr",
+    ),
+    "omniasr-7b": ModelConfig(
+        model_name="omniASR_CTC_7B",
+        backend="omniasr",
+    ),
 }
 
 
@@ -151,7 +203,9 @@ def get_model_info(model_name: str) -> Dict[str, Any]:
         config = _MODEL_PRESETS[model_name]
 
         # Determine language support
-        if "mms" in model_name.lower():
+        if "omniasr" in model_name.lower():
+            languages = "1600+"
+        elif "mms" in model_name.lower():
             if "1b-all" in config.model_name.lower() or "mms-1b-all" in config.model_name.lower():
                 languages = "1100+"
             elif "fl102" in config.model_name.lower():
@@ -162,6 +216,8 @@ def get_model_info(model_name: str) -> Dict[str, Any]:
                 languages = "Multiple"
         elif "xlsr" in model_name.lower():
             languages = "53"
+        elif "nemo" in model_name.lower():
+            languages = "English"  # NeMo models are typically English
         else:
             languages = "English"
 
@@ -199,6 +255,8 @@ def get_preset_by_category() -> Dict[str, List[str]]:
         "Wav2Vec2 (HuggingFace)": [],
         "Wav2Vec2 (TorchAudio)": [],
         "HuBERT (TorchAudio)": [],
+        "NeMo (NVIDIA)": [],
+        "OmniASR (Meta)": [],
     }
 
     for name, config in _MODEL_PRESETS.items():
@@ -212,6 +270,10 @@ def get_preset_by_category() -> Dict[str, List[str]]:
             categories["Wav2Vec2 (HuggingFace)"].append(name)
         elif "hubert" in name:
             categories["HuBERT (TorchAudio)"].append(name)
+        elif "nemo" in name:
+            categories["NeMo (NVIDIA)"].append(name)
+        elif "omniasr" in name:
+            categories["OmniASR (Meta)"].append(name)
 
     return categories
 
@@ -272,12 +334,16 @@ def load_model(
             with_star = preset.with_star
     else:
         actual_model_name = model_name
-        # Auto-detect backend for TorchAudio pipeline names
+        # Auto-detect backend based on model name patterns
         if backend is None:
             if model_name.upper() in ["MMS_FA", "WAV2VEC2_ASR_BASE_960H",
                                        "WAV2VEC2_ASR_LARGE_960H", "WAV2VEC2_ASR_LARGE_LV60K_960H",
                                        "HUBERT_ASR_LARGE", "HUBERT_ASR_XLARGE"]:
                 actual_backend = "torchaudio"
+            elif model_name.startswith("nvidia/") or model_name.startswith("stt_"):
+                actual_backend = "nemo"
+            elif model_name.startswith("omniASR"):
+                actual_backend = "omniasr"
             else:
                 actual_backend = "huggingface"
         else:

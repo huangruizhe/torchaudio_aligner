@@ -191,6 +191,29 @@ class TorchAudioPipelineBackend(CTCModelBackend):
             raise RuntimeError("Model not loaded. Call load() first.")
         return self._vocab_info
 
+    def decode_tokens(self, token_ids: List[int]) -> str:
+        """
+        Decode token IDs to text.
+
+        TorchAudio MMS_FA uses romanized phoneme labels (e.g., 'a', 'i', 'n').
+        For Wav2Vec2/HuBERT pipelines, uses character labels with '|' for word boundaries.
+        """
+        if not self._loaded:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        vocab = self.get_vocab_info()
+        tokens = [vocab.id_to_label.get(idx, "") for idx in token_ids]
+
+        # MMS_FA uses romanized phonemes without explicit word boundaries
+        # Wav2Vec2/HuBERT use '|' for word boundaries
+        if self._is_mms_fa(self.config.model_name):
+            # Romanized phonemes - just join them
+            return "".join(tokens)
+        else:
+            # Character-based with | as word boundary
+            text = "".join(t if t != "|" else " " for t in tokens)
+            return " ".join(text.split())
+
     def get_emissions(
         self,
         waveform: torch.Tensor,

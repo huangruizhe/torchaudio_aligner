@@ -4,9 +4,9 @@ CTC Model Backends - Plugin-style architecture for different model sources.
 This package provides backends for various CTC model sources:
 - huggingface: HuggingFace Transformers (MMS, Wav2Vec2, etc.)
 - torchaudio: TorchAudio pipelines (MMS_FA, etc.)
-- nemo: NVIDIA NeMo (planned)
+- nemo: NVIDIA NeMo (Conformer-CTC, QuartzNet, hybrid RNN-T/CTC)
+- omniasr: Facebook OmniASR (1600+ languages)
 - espnet: ESPnet (planned)
-- omniasr: OmniASR (planned)
 
 Backends are auto-discovered and registered on import.
 Each backend is in its own module to allow optional dependencies.
@@ -51,11 +51,11 @@ def _try_import_backend(module_name: str, backend_name: str) -> bool:
 # Order matters - first successful import wins for aliases
 _try_import_backend("huggingface", "huggingface")
 _try_import_backend("torchaudio_backend", "torchaudio")
+_try_import_backend("nemo_backend", "nemo")
+_try_import_backend("omniasr_backend", "omniasr")
 
 # Future backends (will be skipped if dependencies not available)
-# _try_import_backend("nemo", "nemo")
 # _try_import_backend("espnet", "espnet")
-# _try_import_backend("omniasr", "omniasr")
 
 
 def get_available_backends() -> List[str]:
@@ -75,9 +75,21 @@ try:
 except ImportError:
     TorchAudioPipelineBackend = None
 
+try:
+    from .nemo_backend import NeMoCTCBackend
+except ImportError:
+    NeMoCTCBackend = None
+
+try:
+    from .omniasr_backend import OmniASRBackend
+except ImportError:
+    OmniASRBackend = None
+
 
 __all__ = [
     "get_available_backends",
     "HuggingFaceCTCBackend",
     "TorchAudioPipelineBackend",
+    "NeMoCTCBackend",
+    "OmniASRBackend",
 ]
