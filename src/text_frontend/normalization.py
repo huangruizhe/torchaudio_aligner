@@ -158,8 +158,8 @@ def expand_number(
     if expanded is None and word.endswith('%'):
         expanded = _expand_percentage(word, language)
 
-    # 3. Integer (66)
-    if expanded is None and stripped.isdigit():
+    # 3. Integer (66) - use regex to match only ASCII digits (isdigit() matches Unicode like ²)
+    if expanded is None and re.fullmatch(r'[0-9]+', stripped):
         expanded = _num2words_safe(int(stripped), language)
 
     # 4. Decimal (3.14)
