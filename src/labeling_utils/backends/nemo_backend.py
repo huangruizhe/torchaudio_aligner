@@ -126,7 +126,13 @@ class NeMoCTCBackend(CTCModelBackend):
         if hasattr(tokenizer, 'tokenizer'):
             # BPE tokenizer (has inner sentencepiece model)
             sp_model = tokenizer.tokenizer
-            vocab_size = sp_model.vocab_size()
+            # vocab_size can be property or method depending on version
+            if callable(getattr(sp_model, 'vocab_size', None)):
+                vocab_size = sp_model.vocab_size()
+            elif callable(getattr(sp_model, 'get_piece_size', None)):
+                vocab_size = sp_model.get_piece_size()
+            else:
+                vocab_size = sp_model.vocab_size  # property
 
             # Build labels list
             # Note: In NeMo, blank is at the END (index = vocab_size)
