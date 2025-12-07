@@ -10,7 +10,7 @@ import logging
 
 import torch
 
-from .backends import CTCModelBackend, VocabInfo
+from .base import CTCModelBackend, VocabInfo
 
 logger = logging.getLogger(__name__)
 
