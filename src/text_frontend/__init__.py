@@ -43,11 +43,13 @@ from .romanization import (
 
 # Tokenizers
 from .tokenizers import (
+    TokenizerInterface,
     CharTokenizer,
     BPETokenizer,
     PhonemeTokenizer,
     TokenizerConfig,
     create_tokenizer,
+    create_tokenizer_from_labels,
 )
 
 # Main frontend class
@@ -80,11 +82,13 @@ __all__ = [
     "preprocess_cjk",
     "get_available_romanizers",
     # Tokenizers
+    "TokenizerInterface",
     "CharTokenizer",
     "BPETokenizer",
     "PhonemeTokenizer",
     "TokenizerConfig",
     "create_tokenizer",
+    "create_tokenizer_from_labels",
     # Frontend
     "TextFrontend",
     "PreparedText",

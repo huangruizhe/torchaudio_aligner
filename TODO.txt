@@ -3,3 +3,5 @@
   - Dependency concerns (large install)
 - RNN-T + ngram LM Backend
 - support one-to-many mapping for TN -- this will improve recall without hurting accuracy
+- nbest decoding or beam decoding before LIS
+

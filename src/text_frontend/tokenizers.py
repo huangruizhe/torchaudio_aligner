@@ -5,16 +5,93 @@ Tokenizers for converting text to token IDs for alignment:
 - CharTokenizer: Character-level (for MMS/CTC models)
 - BPETokenizer: Subword-level (SentencePiece, for Conformer)
 - PhonemeTokenizer: Phoneme-level (CMUDict + G2P)
+
+Token format for alignment:
+- Input: "this is a sentence"
+- Output: [[75], [47], [7], [629, 218]]
+  (list of lists, each inner list = tokens for one word)
 """
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict
 import re
 import logging
 
 from .normalization import normalize_for_mms
 
 logger = logging.getLogger(__name__)
+
+
+# ===========================================================================
+# Abstract Base Class for Alignment Tokenizers
+# ===========================================================================
+
+class TokenizerInterface(ABC):
+    """
+    Abstract tokenizer interface for alignment.
+
+    Tokenizers must implement:
+    - encode(): Convert text to token IDs (word-level grouping)
+    - text_normalize(): Normalize text before tokenization
+
+    Token format:
+    - Input: "this is a sentence"
+    - Output: [[75], [47], [7], [629, 218]]
+      (list of lists, each inner list = tokens for one word)
+
+    Special tokens:
+    - blk_id: Blank token ID (usually 0)
+    - unk_id: Unknown token ID
+
+    Attributes:
+        token2id: Dict mapping token strings to IDs
+        id2token: Dict mapping IDs to token strings
+        blk_id: Blank token ID
+        unk_id: Unknown token ID
+    """
+
+    token2id: Dict[str, int]
+    id2token: Dict[int, str]
+    blk_id: int
+    unk_id: int
+
+    @abstractmethod
+    def encode(self, sentence: str, out_type=int) -> List[List[int]]:
+        """
+        Encode text to token IDs.
+
+        Args:
+            sentence: Input text
+            out_type: Output type (int or str)
+
+        Returns:
+            List of lists: [[word1_tokens], [word2_tokens], ...]
+        """
+        raise NotImplementedError
+
+    def encode_flatten(self, sentence: str, out_type=int) -> List[int]:
+        """Encode and flatten to a single list of tokens."""
+        tokens = self.encode(sentence, out_type=out_type)
+
+        # Handle phoneme tokenizer which returns [[[pron1], [pron2]], ...]
+        if tokens and tokens[0] and isinstance(tokens[0][0], (list, tuple)):
+            tokens = [t for w_prons in tokens for t in w_prons[0]]
+        else:
+            tokens = [t for w_tokens in tokens for t in w_tokens]
+
+        return tokens
+
+    def decode_flatten(self, token_ids: List[int]) -> List[str]:
+        """Decode token IDs back to token strings."""
+        if isinstance(token_ids[0], list):
+            return [[self.id2token[t] for t in utt] for utt in token_ids]
+        return [self.id2token[t] for t in token_ids]
+
+    @abstractmethod
+    def text_normalize(self, text: str) -> str:
+        """Normalize text before tokenization."""
+        raise NotImplementedError
 
 
 @dataclass
@@ -25,12 +102,26 @@ class TokenizerConfig:
     vocab: Optional[List[str]] = None
 
 
-class CharTokenizer:
+class CharTokenizer(TokenizerInterface):
     """
     Character-level tokenizer for CTC models.
 
     Converts text to a list of token lists (one per word).
+    Used with character-based CTC models like MMS_FA and Wav2Vec2.
+
+    Example:
+        >>> labels = ('-', 'a', 'i', 'e', ..., '*')
+        >>> tokenizer = CharTokenizer(
+        ...     token2id={c: i for i, c in enumerate(labels)},
+        ...     blank_token="-",
+        ...     unk_token="*",
+        ... )
+        >>> tokenizer.encode("hello")
+        [[7, 4, 11, 11, 14]]  # h, e, l, l, o
     """
+
+    # Punctuation to remove during normalization
+    punctuation = '!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~'
 
     def __init__(
         self,
@@ -46,16 +137,40 @@ class CharTokenizer:
             blank_token: CTC blank token
             unk_token: Unknown token for out-of-vocabulary characters
         """
-        self.token2id = token2id
+        self.token2id = token2id.copy()
         self.id2token = {v: k for k, v in token2id.items()}
         self.blank_token = blank_token
         self.unk_token = unk_token
-        self.blank_id = token2id.get(blank_token)
+        self.blk_id = token2id.get(blank_token, 0)
         self.unk_id = token2id.get(unk_token)
 
+        # Verify blank is at position 0 (k2 requirement)
+        if self.blk_id != 0:
+            logger.warning(
+                f"Blank token '{blank_token}' has ID {self.blk_id}, expected 0. "
+                "This may cause issues with k2 alignment."
+            )
+
+    def _normalize_word(self, word: str) -> str:
+        """Normalize a single word (remove punctuation, lowercase)."""
+        word = word.translate(str.maketrans("", "", self.punctuation))
+        word = word.lower()
+        if len(word) == 0:
+            return self.unk_token
+        return word
+
+    def text_normalize(self, text: str) -> str:
+        """
+        Normalize text, preserving word count.
+
+        Words that become empty after normalization are replaced with unk_token.
+        """
+        words = [self._normalize_word(w) for w in text.split()]
+        return " ".join(words)
+
     def normalize(self, text: str) -> str:
-        """Normalize text for this tokenizer (MMS-style)."""
-        return normalize_for_mms(text)
+        """Alias for text_normalize (backward compatibility)."""
+        return self.text_normalize(text)
 
     def encode_word(self, word: str) -> List[int]:
         """
@@ -75,18 +190,22 @@ class CharTokenizer:
                 tokens.append(self.unk_id)
         return tokens
 
-    def encode(self, text: str) -> List[List[int]]:
+    def encode(self, text: str, out_type=int) -> List[List[int]]:
         """
         Encode text to token IDs (word-level grouping).
 
         Args:
             text: Input text (should be normalized)
+            out_type: Output type (int for IDs, str for tokens)
 
         Returns:
             List of token ID lists, one per word
         """
         words = text.split()
-        return [self.encode_word(word) for word in words]
+        if out_type == int:
+            return [self.encode_word(word) for word in words]
+        else:
+            return [[c for c in word] for word in words]
 
     def decode(self, token_ids: List[List[int]]) -> List[str]:
         """
@@ -105,18 +224,28 @@ class CharTokenizer:
         return words
 
 
-class BPETokenizer:
+class BPETokenizer(TokenizerInterface):
     """
     BPE (Byte Pair Encoding) tokenizer using SentencePiece.
 
     Converts text to subword tokens while preserving word boundaries.
+    Word boundaries are detected by the "▁" prefix in SentencePiece tokens.
 
     Requires: pip install sentencepiece
+
+    Example:
+        >>> import sentencepiece as spm
+        >>> sp_model = spm.SentencePieceProcessor(model_file="model.spm")
+        >>> tokenizer = BPETokenizer(sp_model_path="model.spm")
     """
+
+    # Punctuation to remove during normalization
+    punctuation = '!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~'
 
     def __init__(
         self,
-        sp_model_path: str,
+        sp_model_path: str = None,
+        sp_model=None,
         blank_token: str = "<s>",
         unk_token: str = "<unk>",
     ):
@@ -125,18 +254,24 @@ class BPETokenizer:
 
         Args:
             sp_model_path: Path to SentencePiece model file (.model)
+            sp_model: Pre-loaded SentencePiece model (alternative to path)
             blank_token: CTC blank token
             unk_token: Unknown token
         """
-        try:
-            import sentencepiece as spm
-        except ImportError:
-            raise ImportError("sentencepiece is required. Install with: pip install sentencepiece")
+        if sp_model is not None:
+            self.sp_model = sp_model
+        elif sp_model_path is not None:
+            try:
+                import sentencepiece as spm
+            except ImportError:
+                raise ImportError("sentencepiece is required. Install with: pip install sentencepiece")
+            self.sp_model = spm.SentencePieceProcessor(model_file=str(sp_model_path))
+        else:
+            raise ValueError("Either sp_model_path or sp_model must be provided")
 
-        self.sp_model = spm.SentencePieceProcessor(model_file=str(sp_model_path))
         self.blank_token = blank_token
         self.unk_token = unk_token
-        self.blank_id = self.sp_model.piece_to_id(blank_token)
+        self.blk_id = self.sp_model.piece_to_id(blank_token)
         self.unk_id = self.sp_model.piece_to_id(unk_token)
 
         # Build token<->id mappings
@@ -149,9 +284,29 @@ class BPETokenizer:
             if self.sp_model.id_to_piece(i).startswith("▁")
         }
 
+        # Verify blank is at position 0
+        if self.blk_id != 0:
+            logger.warning(
+                f"Blank token '{blank_token}' has ID {self.blk_id}, expected 0. "
+                "This may cause issues with k2 alignment."
+            )
+
+    def _normalize_word(self, word: str) -> str:
+        """Normalize a single word."""
+        word = word.translate(str.maketrans("", "", self.punctuation))
+        word = word.lower()
+        if len(word) == 0:
+            return "*"
+        return word
+
+    def text_normalize(self, text: str) -> str:
+        """Normalize text, preserving word count."""
+        words = [self._normalize_word(w) for w in text.split()]
+        return " ".join(words)
+
     def normalize(self, text: str) -> str:
-        """Normalize text for this tokenizer."""
-        return text.strip()
+        """Alias for text_normalize."""
+        return self.text_normalize(text)
 
     def _get_word_boundaries(self, token_ids: List[int]) -> List[List[int]]:
         """Split flat token list into word-level groups based on ▁ prefix."""
@@ -167,25 +322,34 @@ class BPETokenizer:
         if current_word:
             result.append(current_word)
 
+        # Remove empty first group if present
+        if result and not result[0]:
+            result = result[1:]
+
         return result
 
     def encode_word(self, word: str) -> List[int]:
         """Encode a single word to token IDs."""
         return self.sp_model.encode(word, out_type=int)
 
-    def encode(self, text: str) -> List[List[int]]:
+    def encode(self, text: str, out_type=int) -> List[List[int]]:
         """
         Encode text to token IDs (word-level grouping).
 
         Args:
             text: Input text
+            out_type: Output type (int or str)
 
         Returns:
             List of token ID lists, one per word
         """
         text = text.strip()
-        token_ids = self.sp_model.encode(text, out_type=int)
-        return self._get_word_boundaries(token_ids)
+        token_ids = self.sp_model.encode(text, out_type=out_type)
+        if out_type == int:
+            return self._get_word_boundaries(token_ids)
+        else:
+            # For string output, split by word
+            return [[t] for t in token_ids]
 
     def decode(self, token_ids: List[List[int]]) -> List[str]:
         """Decode token IDs back to words."""
@@ -199,7 +363,7 @@ class BPETokenizer:
         return self.sp_model.decode(token_ids)
 
 
-class PhonemeTokenizer:
+class PhonemeTokenizer(TokenizerInterface):
     """
     Phoneme-level tokenizer using CMUDict and G2P fallback.
 
@@ -207,7 +371,15 @@ class PhonemeTokenizer:
     Supports multiple pronunciations per word.
 
     Requires: pip install cmudict g2p_en
+
+    Example:
+        >>> tokenizer = PhonemeTokenizer()
+        >>> tokenizer.encode("hello world")
+        [[[HH, AH, L, OW]], [[W, ER, L, D]]]
     """
+
+    # Punctuation to remove during normalization
+    punctuation = '!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~'
 
     def __init__(
         self,
@@ -235,7 +407,7 @@ class PhonemeTokenizer:
         # Build phoneme vocabulary from CMUDict
         self.token2id = {p: i + 1 for i, (p, _) in enumerate(cmudict.phones())}
         self.token2id[blank_token] = 0
-        self.blank_id = 0
+        self.blk_id = 0
         self.unk_token = unk_token
         self.unk_id = len(self.token2id)
         self.token2id[unk_token] = self.unk_id
@@ -243,9 +415,22 @@ class PhonemeTokenizer:
         self.id2token = {v: k for k, v in self.token2id.items()}
         self.blank_token = blank_token
 
+    def _normalize_word(self, word: str) -> str:
+        """Normalize a single word."""
+        word = word.translate(str.maketrans("", "", self.punctuation))
+        word = word.lower()
+        if len(word) == 0:
+            return self.unk_token
+        return word
+
+    def text_normalize(self, text: str) -> str:
+        """Normalize text, preserving word count."""
+        words = [self._normalize_word(w) for w in text.split()]
+        return " ".join(words)
+
     def normalize(self, text: str) -> str:
-        """Normalize text for this tokenizer."""
-        return text.strip().lower()
+        """Alias for text_normalize."""
+        return self.text_normalize(text)
 
     def _get_word_pronunciations(
         self, word: str, num_prons: Optional[int] = None
@@ -283,7 +468,7 @@ class PhonemeTokenizer:
         ]
 
     def encode(
-        self, text: str, num_prons: Optional[int] = None
+        self, text: str, num_prons: Optional[int] = None, out_type=int
     ) -> List[List[List[int]]]:
         """
         Encode text to phoneme IDs (word-level grouping with multiple prons).
@@ -291,24 +476,29 @@ class PhonemeTokenizer:
         Args:
             text: Input text
             num_prons: Maximum pronunciations per word
+            out_type: Output type (int or str)
 
         Returns:
             List of word encodings, each containing list of possible pronunciations
         """
         text = text.strip().lower()
-        return [self.encode_word(word, num_prons) for word in text.split()]
+        if out_type == int:
+            return [self.encode_word(word, num_prons) for word in text.split()]
+        else:
+            return [self._get_word_pronunciations(word, num_prons) for word in text.split()]
 
-    def encode_flat(self, text: str) -> List[int]:
+    def encode_flat(self, text: str, out_type=int) -> List[int]:
         """
         Encode text to flat phoneme sequence (first pronunciation only).
 
         Args:
             text: Input text
+            out_type: Output type
 
         Returns:
             Flat list of phoneme IDs
         """
-        encoded = self.encode(text, num_prons=1)
+        encoded = self.encode(text, num_prons=1, out_type=out_type)
         return [pid for word_prons in encoded for pid in word_prons[0]]
 
     def decode(self, token_ids: List[List[List[int]]]) -> List[List[List[str]]]:
@@ -351,3 +541,46 @@ def create_tokenizer(
         return PhonemeTokenizer(**kwargs)
     else:
         raise ValueError(f"Unknown tokenizer type: {tokenizer_type}. Use 'char', 'bpe', or 'phoneme'.")
+
+
+def create_tokenizer_from_labels(
+    labels: tuple,
+    blank_token: str = "-",
+    unk_token: str = "*",
+) -> CharTokenizer:
+    """
+    Create a character tokenizer from a label tuple.
+
+    This is a convenience function for creating tokenizers that match
+    TorchAudio/HuggingFace model vocabularies.
+
+    Args:
+        labels: Tuple of label strings from model.get_labels() or vocab_info.labels
+        blank_token: Blank token (should be labels[0])
+        unk_token: Unknown token
+
+    Returns:
+        CharTokenizer instance
+
+    Example:
+        >>> import torchaudio
+        >>> bundle = torchaudio.pipelines.MMS_FA
+        >>> labels = bundle.get_labels(star="*")
+        >>> tokenizer = create_tokenizer_from_labels(labels)
+
+        >>> # Or from labeling_utils
+        >>> from labeling_utils import load_model
+        >>> model = load_model("mms-fa")
+        >>> vocab = model.get_vocab_info()
+        >>> tokenizer = create_tokenizer_from_labels(
+        ...     tuple(vocab.labels),
+        ...     blank_token=vocab.blank_token,
+        ...     unk_token=vocab.unk_token,
+        ... )
+    """
+    token2id = {c: i for i, c in enumerate(labels)}
+    return CharTokenizer(
+        token2id=token2id,
+        blank_token=blank_token,
+        unk_token=unk_token,
+    )
