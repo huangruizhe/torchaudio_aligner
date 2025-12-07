@@ -177,8 +177,12 @@ def expand_number(
         expanded = _num2words_safe(int(stripped.replace(',', '')), language)
 
     # 7. Mixed letter-number (COVID19, B2B)
-    if expanded is None and re.search(r'\d', word) and re.search(r'[a-zA-Z]', word):
-        expanded = _expand_mixed(word, language)
+    # Only match ASCII digits to avoid Unicode superscripts like ²
+    if expanded is None and re.search(r'[0-9]', word) and re.search(r'[a-zA-Z]', word):
+        try:
+            expanded = _expand_mixed(word, language)
+        except (ValueError, TypeError):
+            expanded = None
 
     if expanded is None:
         return word
