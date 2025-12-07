@@ -154,7 +154,7 @@ class WFSTAligner(AlignerBackend):
             vocab = model_backend.get_vocab_info()
             self._tokenizer = create_tokenizer_from_labels(
                 tuple(vocab.labels),
-                blk_token=vocab.blank_token,
+                blank_token=vocab.blank_token,
                 unk_token=vocab.unk_token,
             )
 
