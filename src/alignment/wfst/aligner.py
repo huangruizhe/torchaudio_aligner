@@ -49,9 +49,9 @@ from .lis_utils import (
     get_lis_alignment,
 )
 
-# Import from unified frontends
-from ...text_frontend import TokenizerInterface, create_tokenizer_from_labels
-from ...audio_frontend import segment_waveform, SegmentationResult
+# Import from unified frontends (absolute imports for compatibility)
+from text_frontend import TokenizerInterface, create_tokenizer_from_labels
+from audio_frontend import segment_waveform, SegmentationResult
 
 logger = logging.getLogger(__name__)
 
