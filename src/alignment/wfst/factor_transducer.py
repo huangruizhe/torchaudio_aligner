@@ -164,6 +164,14 @@ def make_factor_transducer_word_level_index_with_skip(
 
     word_id_list_flattened = flatten_list(word_id_list)
 
+    # Check for empty input
+    if not word_id_list or not word_id_list_flattened:
+        raise ValueError(
+            "word_id_list is empty after tokenization. "
+            "This usually means text normalization failed for this language. "
+            "Check if the text contains valid characters for the target language."
+        )
+
     if skip_id is None:
         skip_id = 2 * len(word_id_list_flattened) + 1
     return_id = skip_id + 1

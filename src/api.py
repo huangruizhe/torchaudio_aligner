@@ -175,7 +175,8 @@ def align_long_audio(
     if verbose:
         logger.info("Step 2: Loading text...")
 
-    from text_frontend import load_text_from_pdf, normalize_for_mms, romanize_text
+    from text_frontend import load_text_from_pdf, normalize_for_mms, romanize_text_aligned
+    from text_frontend.romanization import preprocess_cjk
 
     if isinstance(text, Path):
         text = str(text)
@@ -204,12 +205,33 @@ def align_long_audio(
     else:
         text_content = text
 
+    # Determine if language needs special handling
+    is_cjk = language in ("cmn", "zh", "jpn", "ja", "kor", "ko", "yue")
+    is_non_latin = language in (
+        "cmn", "zh", "jpn", "ja", "kor", "ko", "yue",  # CJK
+        "hin", "tha", "ara", "heb", "rus", "ukr", "bul",  # Non-Latin
+        "ell", "tam", "tel", "kan", "mal", "ben", "guj",  # More scripts
+    )
+
+    # CJK: split into individual characters
+    if is_cjk:
+        text_content = preprocess_cjk(text_content)
+        if verbose:
+            logger.info(f"  CJK preprocessing applied")
+
     # Keep original words before normalization
     original_text_words = text_content.split()
 
+    # Auto-romanize for non-Latin scripts (unless explicitly disabled)
+    if is_non_latin and not romanize:
+        romanize = True
+        romanize_language = language
+        if verbose:
+            logger.info(f"  Auto-romanization enabled for {language}")
+
     # Normalize
     if romanize and romanize_language:
-        text_content = romanize_text(text_content, language=romanize_language)
+        text_content = romanize_text_aligned(text_content, language=romanize_language)
 
     text_normalized = normalize_for_mms(text_content, expand_numbers=expand_numbers)
     text_words = text_normalized.split()
