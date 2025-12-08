@@ -348,7 +348,6 @@ def save_gentle_html(
 
 def create_interactive_demo(
     word_alignment: Dict[int, Any],
-    text: str,
     audio_file: Union[str, Path],
     output_dir: Union[str, Path],
     frame_duration: float = 0.02,
@@ -360,7 +359,6 @@ def create_interactive_demo(
     This creates a self-contained demo directory with:
     - index.html: Interactive visualization
     - audio_clips/: Directory with individual word audio clips (WAV)
-    - full_audio.mp3: Copy of the original audio
 
     Features:
     - Segment selector (choose range or random)
@@ -369,7 +367,6 @@ def create_interactive_demo(
 
     Args:
         word_alignment: Dict mapping word index to AlignedWord
-        text: Original text
         audio_file: Path to audio file
         output_dir: Directory to save demo files
         frame_duration: Frame duration in seconds
@@ -381,7 +378,6 @@ def create_interactive_demo(
     Example:
         >>> path = create_interactive_demo(
         ...     result.word_alignments,
-        ...     text,
         ...     "audio.mp3",
         ...     "demo_output/",
         ... )
@@ -402,28 +398,30 @@ def create_interactive_demo(
     # Load audio
     audio = AudioSegment.from_file(str(audio_file))
 
-    # Process text
-    text_words = text.split()
-    total_words = len(text_words)
+    # Get total words from word_alignment indices
+    # word_alignment contains all words (aligned have timing, unaligned don't)
+    total_words = max(word_alignment.keys()) + 1 if word_alignment else 0
 
     # Build word data and extract audio clips
     words_data = []
-    for i, word in enumerate(text_words):
+    for i in range(total_words):
+        # Get word from alignment (use .word attribute)
+        aligned = word_alignment.get(i)
+        word_text = aligned.word if aligned else f"[{i}]"
+
         word_info = {
-            "word": word,
+            "word": word_text,
             "index": i,
-            "aligned": False,
+            "aligned": aligned is not None and aligned.start_frame is not None,
             "start": None,
             "end": None,
             "clip": None,
         }
 
-        if i in word_alignment:
-            aligned = word_alignment[i]
+        if aligned and aligned.start_frame is not None:
             start = aligned.start_seconds(frame_duration)
             end = aligned.end_seconds(frame_duration)
 
-            word_info["aligned"] = True
             word_info["start"] = start
             word_info["end"] = end
 

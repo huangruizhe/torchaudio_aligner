@@ -681,7 +681,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def create_interactive_demo(
         self,
-        text: str,
         audio_file: str,
         output_dir: str,
         title: str = None,
@@ -699,7 +698,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         - Modern UI with statistics
 
         Args:
-            text: The text transcript (normalized or original)
             audio_file: Path to the audio file
             output_dir: Directory to save demo files
             title: Optional title for the demo page
@@ -709,7 +707,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         Example:
             >>> result = align_long_audio("audio.mp3", "text.txt", language="eng")
-            >>> result.create_interactive_demo(text_normalized, "audio.mp3", "demo_output/")
+            >>> result.create_interactive_demo("audio.mp3", "demo_output/")
             >>> # Open demo_output/index.html in browser
         """
         # Build title if not provided
@@ -725,7 +723,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         from visualization_utils.gentle import create_interactive_demo as _create_demo
         return _create_demo(
             word_alignment=word_alignment,
-            text=text,
             audio_file=audio_file,
             output_dir=output_dir,
             frame_duration=DEFAULT_FRAME_DURATION,
