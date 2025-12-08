@@ -58,7 +58,7 @@ def align_long_audio(
     # Alignment parameters
     skip_penalty: float = -0.5,
     return_penalty: float = -18.0,
-    batch_size: int = 16,  # Reduced from 32 to avoid OOM on smaller GPUs
+    batch_size: int = 32,
     # Text parameters
     expand_numbers: bool = True,
     romanize: bool = False,
@@ -255,62 +255,61 @@ def align_long_audio(
         logger.info(f"  States: {decoding_graph.shape[0]}, Arcs: {decoding_graph.num_arcs}")
 
     # =========================================================================
-    # Step 5: Align segments
+    # Step 5: Align segments (following Tutorial.py pattern)
     # =========================================================================
     if verbose:
         logger.info("Step 5: Aligning segments...")
 
-    from tqdm import tqdm
     from alignment.wfst.k2_utils import align_segments
+    from tqdm import tqdm
 
-    num_segments = segmentation.num_segments
-    segment_offsets_frames = segmentation.get_offsets_in_frames(frame_duration)
+    # Pre-batch all waveforms once on CPU (memory efficient pattern from Tutorial.py)
+    waveforms_batched, lengths = segmentation.get_waveforms_batched()
+    offsets = segmentation.get_offsets_in_frames(frame_duration)
 
     alignment_results = []
 
-    for i in tqdm(range(0, num_segments, batch_size), disable=not verbose):
-        batch_end = min(i + batch_size, num_segments)
-        batch_segments = segmentation.segments[i:batch_end]
-        batch_offsets = segment_offsets_frames[i:batch_end]
+    iterator = range(0, segmentation.num_segments, batch_size)
+    if verbose:
+        iterator = tqdm(iterator, desc="Aligning")
 
-        # Prepare batch
-        max_len = max(seg.waveform.shape[-1] for seg in batch_segments)
-        batch_waveforms = torch.zeros(len(batch_segments), max_len)
-        batch_lengths = torch.zeros(len(batch_segments), dtype=torch.long)
+    for i in iterator:
+        # Only move the current batch slice to GPU
+        batch_waveforms = waveforms_batched[i:i + batch_size].to(device)
+        batch_lengths = lengths[i:i + batch_size].to(device)
+        batch_offsets = offsets[i:i + batch_size]
 
-        for j, seg in enumerate(batch_segments):
-            length = seg.waveform.shape[-1]
-            batch_waveforms[j, :length] = seg.waveform
-            batch_lengths[j] = length
-
-        batch_waveforms = batch_waveforms.to(device)
-        batch_lengths = batch_lengths.to(device)
-
-        # Get emissions
+        # Get emissions from model
         with torch.inference_mode():
             emissions, emission_lengths = model.get_emissions(batch_waveforms, batch_lengths)
 
-        # Align
-        batch_results = align_segments(emissions, decoding_graph, emission_lengths)
+        # Add star dimension if needed (MMS model compatibility)
+        if emissions.size(-1) == len(vocab.labels) - 1:
+            star_dim = torch.full(
+                (emissions.size(0), emissions.size(1), 1),
+                -5.0,
+                device=emissions.device,
+            )
+            emissions = torch.cat((emissions, star_dim), dim=-1)
 
-        # Add offsets and word indices
+        # Align segments using the tested API (matches Tutorial.py)
+        batch_results = align_segments(
+            emissions,
+            decoding_graph,
+            emission_lengths,
+        )
+
+        # Add frame offsets and word indices to tokens
         for aligned_tokens, offset in zip(batch_results, batch_offsets):
-            offset_val = offset.item()
             for token in aligned_tokens:
-                token.timestamp += offset_val
+                token.timestamp += offset.item()
                 if token.token_id == tokenizer.blk_id:
                     continue
                 if token.token_id in word_index_sym_tab:
                     token.attr["wid"] = word_index_sym_tab[token.token_id]
                 if token.token_id in token_sym_tab:
                     token.attr["tk"] = token_sym_tab[token.token_id]
-
-        alignment_results.extend(batch_results)
-
-        # Clean up
-        del batch_waveforms, batch_lengths, emissions, emission_lengths
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+            alignment_results.append(aligned_tokens)
 
     if verbose:
         logger.info(f"  Aligned {len(alignment_results)} segments")
