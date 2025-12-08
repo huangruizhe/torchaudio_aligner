@@ -71,6 +71,10 @@ from .base import (
     AlignedToken,
     AlignmentConfig,
     AlignerBackend,
+    # Frame duration utilities
+    set_frame_duration,
+    get_frame_duration,
+    DEFAULT_FRAME_DURATION,
 )
 from .wfst import WFSTAligner
 from .wfst.aligner import SegmentAlignmentResult
@@ -87,6 +91,10 @@ __all__ = [
     "SegmentAlignmentResult",
     # Base class
     "AlignerBackend",
+    # Frame duration utilities
+    "set_frame_duration",
+    "get_frame_duration",
+    "DEFAULT_FRAME_DURATION",
     # Backends
     "WFSTAligner",
     "MFAAligner",

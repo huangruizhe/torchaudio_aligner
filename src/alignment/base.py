@@ -85,7 +85,32 @@ class AlignedChar:
 # =============================================================================
 
 # Default frame duration (20ms per frame, 50 frames/second)
+# This is set by the model when loaded. Most CTC models use 20ms.
 DEFAULT_FRAME_DURATION = 0.02
+
+
+def set_frame_duration(duration: float) -> None:
+    """
+    Set the global frame duration used for frame-to-seconds conversion.
+
+    This is typically called by the model loader when a model is loaded,
+    as different models may have different frame rates.
+
+    Args:
+        duration: Frame duration in seconds (e.g., 0.02 for 20ms frames)
+
+    Example:
+        >>> from alignment.base import set_frame_duration
+        >>> set_frame_duration(0.02)  # 20ms frames (MMS, Wav2Vec2)
+        >>> set_frame_duration(0.01)  # 10ms frames (some NeMo models)
+    """
+    global DEFAULT_FRAME_DURATION
+    DEFAULT_FRAME_DURATION = duration
+
+
+def get_frame_duration() -> float:
+    """Get the current global frame duration."""
+    return DEFAULT_FRAME_DURATION
 
 
 @dataclass
@@ -117,16 +142,34 @@ class AlignedWord:
     index: int = -1
     chars: List[AlignedChar] = field(default_factory=list)
 
-    def start_seconds(self, frame_duration: float = DEFAULT_FRAME_DURATION) -> float:
-        """Get start time in seconds."""
+    def start_seconds(self, frame_duration: float = None) -> float:
+        """Get start time in seconds.
+
+        Args:
+            frame_duration: Optional override. If None, uses global DEFAULT_FRAME_DURATION.
+        """
+        if frame_duration is None:
+            frame_duration = DEFAULT_FRAME_DURATION
         return self.start_frame * frame_duration
 
-    def end_seconds(self, frame_duration: float = DEFAULT_FRAME_DURATION) -> float:
-        """Get end time in seconds."""
+    def end_seconds(self, frame_duration: float = None) -> float:
+        """Get end time in seconds.
+
+        Args:
+            frame_duration: Optional override. If None, uses global DEFAULT_FRAME_DURATION.
+        """
+        if frame_duration is None:
+            frame_duration = DEFAULT_FRAME_DURATION
         return self.end_frame * frame_duration
 
-    def duration_seconds(self, frame_duration: float = DEFAULT_FRAME_DURATION) -> float:
-        """Get duration in seconds."""
+    def duration_seconds(self, frame_duration: float = None) -> float:
+        """Get duration in seconds.
+
+        Args:
+            frame_duration: Optional override. If None, uses global DEFAULT_FRAME_DURATION.
+        """
+        if frame_duration is None:
+            frame_duration = DEFAULT_FRAME_DURATION
         return (self.end_frame - self.start_frame) * frame_duration
 
     @property
@@ -159,8 +202,13 @@ class AlignedWord:
             return f"{self.original} ({self.word})"
         return self.word
 
-    def to_dict(self, include_chars: bool = False, frame_duration: float = DEFAULT_FRAME_DURATION) -> Dict[str, Any]:
-        """Convert to dictionary (times in seconds for JSON export)."""
+    def to_dict(self, include_chars: bool = False, frame_duration: float = None) -> Dict[str, Any]:
+        """Convert to dictionary (times in seconds for JSON export).
+
+        Args:
+            include_chars: Include character-level alignments
+            frame_duration: Optional override. If None, uses global DEFAULT_FRAME_DURATION.
+        """
         d = {
             "word": self.word,
             "start": round(self.start_seconds(frame_duration), 3),
