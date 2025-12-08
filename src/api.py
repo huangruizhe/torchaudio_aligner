@@ -408,7 +408,7 @@ def align_long_audio(
         for aligned_tokens, offset in zip(batch_results, batch_offsets):
             for token in aligned_tokens:
                 token.timestamp += offset.item()
-                if token.token_id == tokenizer.blank_id:
+                if token.token_id == tokenizer.blk_id:
                     continue
                 if token.token_id in word_index_sym_tab:
                     token.attr["wid"] = word_index_sym_tab[token.token_id]
