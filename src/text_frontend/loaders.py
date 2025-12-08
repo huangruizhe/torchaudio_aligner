@@ -74,7 +74,7 @@ def load_text_from_file(file_path: Union[str, Path], encoding: str = "utf-8") ->
     return text
 
 
-def load_text_from_url(url: str, timeout: int = 30) -> str:
+def load_text_from_url(url: str, timeout: int = 30, encoding: Optional[str] = None) -> str:
     """
     Load text from a URL (HTML page).
 
@@ -83,6 +83,9 @@ def load_text_from_url(url: str, timeout: int = 30) -> str:
     Args:
         url: URL to fetch
         timeout: Request timeout in seconds
+        encoding: Force specific encoding. If None, tries auto-detection with
+            fallback to Japanese encodings (shiftjis, shift_jisx0213) for
+            compatibility with Japanese websites.
 
     Returns:
         Extracted text content
@@ -92,11 +95,34 @@ def load_text_from_url(url: str, timeout: int = 30) -> str:
     if not _BS4_AVAILABLE:
         raise ImportError("beautifulsoup4 is required. Install with: pip install beautifulsoup4")
 
+    import html
+
     logger.info(f"Fetching text from URL: {url}")
     response = requests.get(url, timeout=timeout)
     response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    # Decode response with encoding fallbacks
+    if encoding:
+        text_content = response.content.decode(encoding)
+    else:
+        # Try standard decoding first, then Japanese encodings as fallback
+        encodings_to_try = ['utf-8', 'shiftjis', 'shift_jisx0213', 'euc-jp', 'iso-2022-jp']
+        text_content = None
+        for enc in encodings_to_try:
+            try:
+                text_content = response.content.decode(enc)
+                logger.debug(f"Successfully decoded with encoding: {enc}")
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        if text_content is None:
+            # Fall back to requests' detected encoding
+            text_content = response.text
+
+    # Unescape HTML entities
+    text_content = html.unescape(text_content)
+
+    soup = BeautifulSoup(text_content, "html.parser")
     text = soup.get_text()
     text = text.replace("\r\n", "\n")
 

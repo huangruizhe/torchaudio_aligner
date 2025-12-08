@@ -175,7 +175,7 @@ def align_long_audio(
     if verbose:
         logger.info("Step 2: Loading text...")
 
-    from text_frontend import load_text_from_pdf, load_text_from_pdf_ocr, normalize_for_mms, romanize_text_aligned
+    from text_frontend import load_text_from_pdf, load_text_from_pdf_ocr, load_text_from_url, normalize_for_mms, romanize_text_aligned
     from text_frontend.romanization import preprocess_cjk
 
     # Map language codes to EasyOCR language codes for OCR fallback
@@ -199,7 +199,12 @@ def align_long_audio(
         text = str(text)
 
     if isinstance(text, str):
-        if text.endswith('.pdf'):
+        if text.startswith('http://') or text.startswith('https://'):
+            # URL - fetch and parse HTML
+            text_content = load_text_from_url(text)
+            if verbose:
+                logger.info(f"  URL: {text}")
+        elif text.endswith('.pdf'):
             text_content = load_text_from_pdf(text)
             # Check if PDF extraction returned meaningful text
             if len(text_content.strip()) < 100 or len(text_content.split()) < 20:
