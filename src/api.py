@@ -335,7 +335,7 @@ def align_long_audio(
 
     from alignment.wfst.k2_utils import get_final_word_alignment_seconds
 
-    words = get_final_word_alignment_seconds(
+    words, chars = get_final_word_alignment_seconds(
         resolved_tokens,
         text_normalized,
         original_text_words,
@@ -346,6 +346,7 @@ def align_long_audio(
     if verbose:
         coverage = 100.0 * len(words) / len(text_words) if text_words else 0
         logger.info(f"  Aligned: {len(words)} / {len(text_words)} words ({coverage:.1f}%)")
+        logger.info(f"  Characters: {len(chars)}")
 
     # =========================================================================
     # Build result
@@ -354,12 +355,14 @@ def align_long_audio(
         "audio_duration": segmentation.original_duration_seconds,
         "num_segments": segmentation.num_segments,
         "total_words": len(text_words),
+        "total_chars": len(chars),
         "model": model_name,
         "language": language,
     }
 
     result = AlignmentResult(
         words=words,
+        chars=chars,
         unaligned_regions=unaligned_indices if unaligned_indices else [],
         metadata=metadata,
     )

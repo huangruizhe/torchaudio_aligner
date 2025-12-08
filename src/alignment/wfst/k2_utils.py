@@ -11,8 +11,8 @@ from typing import Dict, List, Tuple, Optional
 import torch
 import logging
 
-# Import both the internal AlignedToken and the user-facing AlignedWord
-from alignment.base import AlignedToken, AlignedWord as AlignedWordSeconds
+# Import both the internal AlignedToken and the user-facing classes
+from alignment.base import AlignedToken, AlignedWord as AlignedWordSeconds, AlignedChar
 
 logger = logging.getLogger(__name__)
 
@@ -779,12 +779,12 @@ def get_final_word_alignment_seconds(
     original_text_words: List[str],
     tokenizer,
     frame_duration: float = 0.02,
-) -> List[AlignedWordSeconds]:
+) -> Tuple[List[AlignedWordSeconds], List[AlignedChar]]:
     """
     Convert token-level alignment to word-level alignment with times in SECONDS.
 
     This is the user-facing function that returns a clean list of AlignedWord
-    objects with all times converted to seconds.
+    objects with all times converted to seconds, plus character-level alignments.
 
     Args:
         alignment_results: List of AlignedToken from concat_alignments
@@ -794,7 +794,9 @@ def get_final_word_alignment_seconds(
         frame_duration: Duration per frame in seconds (default 0.02 = 20ms)
 
     Returns:
-        List of AlignedWord objects sorted by start time.
+        Tuple of (words, chars):
+        - words: List of AlignedWord objects sorted by start time
+        - chars: List of AlignedChar objects sorted by start time
         All times are in seconds, ready for user consumption.
     """
     # First, get the frame-based alignment
@@ -805,10 +807,24 @@ def get_final_word_alignment_seconds(
     )
 
     if not word_alignment_frames:
-        return []
+        return [], []
 
-    # Convert to seconds-based AlignedWord objects
+    # Build char-level alignments from alignment_results
+    # Group tokens by word index
+    word_tokens = {}  # word_idx -> list of (token, timestamp, score)
+    for token in alignment_results:
+        if token.token_id == tokenizer.blk_id:
+            continue
+        if "wid" in token.attr:
+            wid = token.attr["wid"]
+            if wid not in word_tokens:
+                word_tokens[wid] = []
+            char = token.attr.get("tk", str(token.token_id))
+            word_tokens[wid].append((char, token.timestamp, token.score))
+
+    # Convert to seconds-based AlignedWord objects with chars
     words = []
+    all_chars = []
     text_splitted = text.split()
 
     for idx, aligned_word_internal in sorted(word_alignment_frames.items()):
@@ -821,7 +837,7 @@ def get_final_word_alignment_seconds(
         if aligned_word_internal.end_time is not None:
             end_sec = aligned_word_internal.end_time * frame_duration
         else:
-            end_sec = start_sec + 0.5  # Fallback (shouldn't happen with _compute_word_end_times)
+            end_sec = start_sec + 0.5  # Fallback
 
         # Get original word form if different from normalized
         original = None
@@ -830,13 +846,41 @@ def get_final_word_alignment_seconds(
             if orig_word.lower() != aligned_word_internal.word.lower():
                 original = orig_word
 
+        # Build char-level alignments for this word
+        word_chars = []
+        word_scores = []
+        if idx in word_tokens:
+            tokens = word_tokens[idx]
+            for i, (char, timestamp, score) in enumerate(tokens):
+                char_start = timestamp * frame_duration
+                # Estimate char end from next char or word end
+                if i + 1 < len(tokens):
+                    char_end = tokens[i + 1][1] * frame_duration
+                else:
+                    char_end = end_sec
+
+                aligned_char = AlignedChar(
+                    char=char,
+                    start=char_start,
+                    end=char_end,
+                    score=score,
+                    word_index=idx,
+                )
+                word_chars.append(aligned_char)
+                all_chars.append(aligned_char)
+                word_scores.append(score)
+
+        # Compute word score as average of char scores
+        word_score = sum(word_scores) / len(word_scores) if word_scores else 0.0
+
         words.append(AlignedWordSeconds(
             word=aligned_word_internal.word,
             start=start_sec,
             end=end_sec,
-            score=aligned_word_internal.score,
+            score=word_score,
             original=original,
             index=idx,
+            chars=word_chars,
         ))
 
-    return words
+    return words, all_chars

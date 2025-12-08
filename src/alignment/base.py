@@ -39,6 +39,48 @@ class AlignedToken:
 
 
 # =============================================================================
+# User-facing Character/Token (seconds-based)
+# =============================================================================
+
+@dataclass
+class AlignedChar:
+    """
+    A single aligned character/token with timestamp.
+
+    This provides character-level (or token-level) alignment for users
+    who need finer granularity than word-level.
+
+    Attributes:
+        char: The character/token text
+        start: Start time in seconds
+        end: End time in seconds
+        score: Confidence score (log probability from CTC)
+        word_index: Index of the word this char belongs to
+
+    Example:
+        >>> for char in word.chars:
+        ...     print(f"{char.char}: {char.start:.3f}s")
+    """
+    char: str
+    start: float  # seconds
+    end: float    # seconds
+    score: float = 0.0
+    word_index: int = -1
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "char": self.char,
+            "start": round(self.start, 4),
+            "end": round(self.end, 4),
+            "score": round(self.score, 3) if self.score != 0 else 0,
+        }
+
+    def __repr__(self):
+        return f"AlignedChar('{self.char}', {self.start:.3f}s-{self.end:.3f}s)"
+
+
+# =============================================================================
 # User-facing Word (seconds-based)
 # =============================================================================
 
@@ -53,14 +95,16 @@ class AlignedWord:
         word: The word text (normalized form)
         start: Start time in seconds
         end: End time in seconds
-        score: Confidence score (0-1, higher is better)
+        score: Confidence score (average of char scores, higher is better)
         original: Original word form before normalization (if different)
         index: Word index in the original transcript
+        chars: List of character-level alignments (optional)
 
     Example:
         >>> word = result.words[0]
-        >>> print(f"{word.word}: {word.start:.2f}s - {word.end:.2f}s")
-        hello: 0.52s - 0.78s
+        >>> print(f"{word.word}: {word.start:.2f}s - {word.end:.2f}s (score: {word.score:.2f})")
+        >>> for char in word.chars:
+        ...     print(f"  {char.char}: {char.start:.3f}s")
     """
     word: str
     start: float  # seconds
@@ -68,13 +112,19 @@ class AlignedWord:
     score: float = 0.0
     original: Optional[str] = None
     index: int = -1
+    chars: List[AlignedChar] = field(default_factory=list)
 
     @property
     def duration(self) -> float:
         """Duration in seconds."""
         return self.end - self.start
 
-    def to_dict(self) -> Dict[str, Any]:
+    @property
+    def confidence(self) -> float:
+        """Alias for score (confidence score 0-1)."""
+        return self.score
+
+    def to_dict(self, include_chars: bool = False) -> Dict[str, Any]:
         """Convert to dictionary."""
         d = {
             "word": self.word,
@@ -87,12 +137,15 @@ class AlignedWord:
             d["score"] = round(self.score, 3)
         if self.index >= 0:
             d["index"] = self.index
+        if include_chars and self.chars:
+            d["chars"] = [c.to_dict() for c in self.chars]
         return d
 
     def __repr__(self):
+        score_str = f", score={self.score:.2f}" if self.score > 0 else ""
         if self.original and self.original != self.word:
-            return f"AlignedWord('{self.original}' ({self.word}), {self.start:.2f}s-{self.end:.2f}s)"
-        return f"AlignedWord('{self.word}', {self.start:.2f}s-{self.end:.2f}s)"
+            return f"AlignedWord('{self.original}' ({self.word}), {self.start:.2f}s-{self.end:.2f}s{score_str})"
+        return f"AlignedWord('{self.word}', {self.start:.2f}s-{self.end:.2f}s{score_str})"
 
 
 # =============================================================================
@@ -109,6 +162,7 @@ class AlignmentResult:
 
     Attributes:
         words: List of aligned words (sorted by time)
+        chars: List of all aligned characters (sorted by time)
         unaligned_regions: List of (start_idx, end_idx) for unaligned text
         metadata: Additional info (duration, model, etc.)
 
@@ -117,8 +171,10 @@ class AlignmentResult:
         >>> for word in result:
         ...     print(f"{word.word}: {word.start:.2f}s")
         >>> result.save_audacity_labels("labels.txt")
+        >>> print(result.statistics())
     """
     words: List[AlignedWord] = field(default_factory=list)
+    chars: List[AlignedChar] = field(default_factory=list)
     unaligned_regions: List[Tuple[int, int]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -270,6 +326,235 @@ class AlignmentResult:
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.to_textgrid())
         return path
+
+    def to_ctm(self, audio_id: str = "audio") -> str:
+        """
+        Export as CTM (time-marked conversation) format.
+
+        CTM is a standard format for speech recognition output.
+        Format: <audio_id> <channel> <start> <duration> <word> [<confidence>]
+
+        Args:
+            audio_id: Identifier for the audio file
+
+        Returns:
+            CTM format string
+        """
+        lines = []
+        for word in self.words:
+            duration = word.end - word.start
+            conf_str = f" {word.score:.3f}" if word.score > 0 else ""
+            lines.append(f"{audio_id} 1 {word.start:.3f} {duration:.3f} {word.word}{conf_str}")
+        return "\n".join(lines)
+
+    def save_ctm(self, path: str, audio_id: str = "audio") -> str:
+        """Save as CTM file."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.to_ctm(audio_id))
+        return path
+
+    def to_ass(
+        self,
+        words_per_line: int = 8,
+        style_name: str = "Default",
+        font_name: str = "Arial",
+        font_size: int = 48,
+        primary_color: str = "&H00FFFFFF",  # White
+        highlight_color: str = "&H0000FFFF",  # Yellow
+        outline_color: str = "&H00000000",  # Black
+        vertical_margin: int = 50,
+    ) -> str:
+        """
+        Export as ASS (Advanced SubStation Alpha) subtitle format.
+
+        ASS supports word-by-word highlighting for karaoke-style subtitles.
+
+        Args:
+            words_per_line: Number of words per subtitle line
+            style_name: Name of the style
+            font_name: Font family name
+            font_size: Font size in points
+            primary_color: Default text color (ASS format: &HAABBGGRR)
+            highlight_color: Highlighted word color
+            outline_color: Text outline color
+            vertical_margin: Bottom margin in pixels
+
+        Returns:
+            ASS format string
+        """
+        def time_to_ass(seconds: float) -> str:
+            """Convert seconds to ASS timestamp format (H:MM:SS.cc)"""
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = seconds % 60
+            return f"{h}:{m:02d}:{s:05.2f}"
+
+        # ASS header
+        header = f"""[Script Info]
+Title: TorchAudio Aligner Output
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+Timer: 100.0000
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: {style_name},{font_name},{font_size},{primary_color},{highlight_color},{outline_color},&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,10,10,{vertical_margin},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        lines = [header.strip()]
+
+        # Group words into subtitle lines
+        for i in range(0, len(self.words), words_per_line):
+            chunk = self.words[i:i + words_per_line]
+            if not chunk:
+                continue
+
+            line_start = chunk[0].start
+            line_end = chunk[-1].end
+
+            # Build karaoke text with timing tags
+            # {\k<duration in centiseconds>}word
+            karaoke_parts = []
+            for j, word in enumerate(chunk):
+                # Duration in centiseconds (100ths of a second)
+                if j < len(chunk) - 1:
+                    duration_cs = int((chunk[j + 1].start - word.start) * 100)
+                else:
+                    duration_cs = int((word.end - word.start) * 100)
+                karaoke_parts.append(f"{{\\kf{duration_cs}}}{word.word}")
+
+            text = " ".join(karaoke_parts)
+            start_str = time_to_ass(line_start)
+            end_str = time_to_ass(line_end)
+
+            lines.append(f"Dialogue: 0,{start_str},{end_str},{style_name},,0,0,0,,{text}")
+
+        return "\n".join(lines)
+
+    def save_ass(self, path: str, **kwargs) -> str:
+        """Save as ASS subtitle file."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.to_ass(**kwargs))
+        return path
+
+    # -------------------------------------------------------------------------
+    # Statistics
+    # -------------------------------------------------------------------------
+
+    def statistics(self) -> Dict[str, Any]:
+        """
+        Compute alignment statistics.
+
+        Returns:
+            Dictionary with various statistics about the alignment.
+        """
+        if not self.words:
+            return {"error": "No words aligned"}
+
+        # Basic counts
+        stats = {
+            "num_words": len(self.words),
+            "num_chars": len(self.chars) if self.chars else sum(len(w.chars) for w in self.words),
+            "num_unaligned_regions": len(self.unaligned_regions),
+        }
+
+        # Coverage
+        if "total_words" in self.metadata:
+            stats["total_words_in_text"] = self.metadata["total_words"]
+            stats["coverage_percent"] = 100.0 * len(self.words) / self.metadata["total_words"]
+
+        # Time statistics
+        stats["time_range"] = {
+            "start": self.words[0].start,
+            "end": self.words[-1].end,
+            "duration": self.words[-1].end - self.words[0].start,
+        }
+
+        if "audio_duration" in self.metadata:
+            stats["audio_duration"] = self.metadata["audio_duration"]
+            aligned_duration = self.words[-1].end - self.words[0].start
+            stats["aligned_time_percent"] = 100.0 * aligned_duration / self.metadata["audio_duration"]
+
+        # Word duration statistics
+        durations = [w.duration for w in self.words]
+        stats["word_duration"] = {
+            "mean": sum(durations) / len(durations),
+            "min": min(durations),
+            "max": max(durations),
+            "median": sorted(durations)[len(durations) // 2],
+        }
+
+        # Confidence statistics (if available)
+        scores = [w.score for w in self.words if w.score > 0]
+        if scores:
+            stats["confidence"] = {
+                "mean": sum(scores) / len(scores),
+                "min": min(scores),
+                "max": max(scores),
+                "words_with_score": len(scores),
+            }
+
+        # Gap statistics (time between words)
+        gaps = []
+        for i in range(1, len(self.words)):
+            gap = self.words[i].start - self.words[i - 1].end
+            if gap > 0:
+                gaps.append(gap)
+        if gaps:
+            stats["gaps"] = {
+                "count": len(gaps),
+                "total": sum(gaps),
+                "mean": sum(gaps) / len(gaps),
+                "max": max(gaps),
+            }
+
+        return stats
+
+    def print_statistics(self) -> None:
+        """Print alignment statistics in a readable format."""
+        stats = self.statistics()
+
+        print("=" * 60)
+        print("Alignment Statistics")
+        print("=" * 60)
+
+        print(f"\nWords aligned: {stats['num_words']}")
+        if "total_words_in_text" in stats:
+            print(f"Total words in text: {stats['total_words_in_text']}")
+            print(f"Coverage: {stats['coverage_percent']:.1f}%")
+
+        print(f"Unaligned regions: {stats['num_unaligned_regions']}")
+
+        tr = stats["time_range"]
+        print(f"\nTime range: {tr['start']:.2f}s - {tr['end']:.2f}s ({tr['duration']:.1f}s)")
+        if "audio_duration" in stats:
+            print(f"Audio duration: {stats['audio_duration']:.1f}s")
+            print(f"Aligned time: {stats.get('aligned_time_percent', 0):.1f}%")
+
+        wd = stats["word_duration"]
+        print(f"\nWord duration:")
+        print(f"  Mean: {wd['mean']*1000:.0f}ms")
+        print(f"  Min: {wd['min']*1000:.0f}ms")
+        print(f"  Max: {wd['max']*1000:.0f}ms")
+        print(f"  Median: {wd['median']*1000:.0f}ms")
+
+        if "confidence" in stats:
+            conf = stats["confidence"]
+            print(f"\nConfidence scores:")
+            print(f"  Mean: {conf['mean']:.3f}")
+            print(f"  Min: {conf['min']:.3f}")
+            print(f"  Max: {conf['max']:.3f}")
+
+        if "gaps" in stats:
+            g = stats["gaps"]
+            print(f"\nGaps between words:")
+            print(f"  Count: {g['count']}")
+            print(f"  Total: {g['total']*1000:.0f}ms")
+            print(f"  Mean: {g['mean']*1000:.0f}ms")
+            print(f"  Max: {g['max']*1000:.0f}ms")
 
     # -------------------------------------------------------------------------
     # Summary

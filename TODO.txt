@@ -7,4 +7,5 @@
 - pattern-based automatic k2 version detection
 - lis version 1.0
 - HTML Visualization -- click and play on the words, more fancy visualization like real time playing etc
+- use https://github.com/MahmoudAshraf97/ctc-forced-aligner as underlying alignment support
 
