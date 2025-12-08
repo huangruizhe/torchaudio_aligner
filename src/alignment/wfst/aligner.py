@@ -40,7 +40,12 @@ from .factor_transducer import (
     make_factor_transducer_word_level_index_with_skip,
     flatten_list,
 )
-from .k2_utils import get_best_paths, get_texts_with_timestamp, AlignedWordInternal
+from .k2_utils import (
+    get_best_paths,
+    get_texts_with_timestamp,
+    concat_alignments,
+    get_final_word_alignment_seconds,
+)
 from .lis_utils import (
     compute_lis,
     remove_outliers,
@@ -404,7 +409,7 @@ class WFSTAligner(AlignerBackend):
             f"{len(unaligned_indices)} unaligned regions"
         )
 
-        # Step 5: Build word alignments
+        # Step 5: Build word alignments using the existing working function
         logger.info("Step 5: Building word alignments")
         if not resolved_results:
             return AlignmentResult(
@@ -414,14 +419,20 @@ class WFSTAligner(AlignerBackend):
                 metadata={"backend": self.BACKEND_NAME},
             )
 
-        # Get normalized text for matching
+        # Use the existing tested function from k2_utils
         text_normalized = self._tokenizer.text_normalize(text)
-        word_alignment = self._get_word_alignment(
+        original_text_words = text.split()
+
+        words, chars = get_final_word_alignment_seconds(
             resolved_results,
-            text_normalized,  # normalized text (for word matching)
-            text,             # original text (for display)
+            text_normalized,
+            original_text_words,
             self._tokenizer,
+            frame_duration=config.frame_duration,
         )
+
+        # Convert list to dict for AlignmentResult compatibility
+        word_alignment = {word.index: word for word in words}
         logger.info(f"Aligned {len(word_alignment)} words")
 
         return AlignmentResult(
@@ -590,105 +601,3 @@ class WFSTAligner(AlignerBackend):
         unaligned_indices = find_unaligned_regions(rg_min, rg_max, set_lis)
 
         return resolved_results, unaligned_indices
-
-    def _get_word_alignment(
-        self,
-        alignment_results: List[AlignedToken],
-        text: str,
-        original_text: str,
-        tokenizer: TokenizerInterface,
-        frame_rate: float = 50.0,
-    ) -> Dict[int, AlignedWord]:
-        """
-        Convert token alignments to word alignments.
-
-        Args:
-            alignment_results: List of AlignedToken
-            text: Normalized text (used for alignment)
-            original_text: Original text before normalization
-            tokenizer: Tokenizer for token decoding
-            frame_rate: Frame rate in Hz (default 50 = 20ms frames)
-
-        Returns:
-            Dict mapping word index to AlignedWord (user-facing, times in seconds)
-        """
-        text_splitted = text.split()
-        original_text_words = original_text.split()
-
-        # Build internal word alignment (in frames)
-        internal_alignment: Dict[int, AlignedWordInternal] = {}
-        aligned_word_internal = None
-        word_idx = None
-
-        for aligned_token in alignment_results:
-            if "wid" in aligned_token.attr:
-                # Save previous word
-                if aligned_word_internal is not None:
-                    internal_alignment[word_idx] = aligned_word_internal
-
-                word_idx = aligned_token.attr["wid"]
-
-                # Get word text (normalized form)
-                if word_idx >= len(text_splitted):
-                    word = None  # End marker
-                else:
-                    word = text_splitted[word_idx]
-
-                aligned_word_internal = AlignedWordInternal(
-                    word=word,
-                    start_time=aligned_token.timestamp,
-                    end_time=None,
-                    phones=[],
-                )
-
-            # Add phone to current word
-            if aligned_word_internal is not None and "tk" in aligned_token.attr:
-                aligned_word_internal.phones.append(
-                    AlignedToken(
-                        token_id=tokenizer.id2token[aligned_token.attr["tk"]],
-                        timestamp=aligned_token.timestamp,
-                        score=aligned_token.score,
-                    )
-                )
-
-        # Save last word
-        if aligned_word_internal is not None:
-            internal_alignment[word_idx] = aligned_word_internal
-
-        # Compute end times (in frames)
-        sorted_indices = sorted(internal_alignment.keys())
-        for i, idx in enumerate(sorted_indices[:-1]):
-            next_idx = sorted_indices[i + 1]
-            internal_alignment[idx].end_time = internal_alignment[next_idx].start_time
-
-        # Convert to user-facing AlignedWord (times in seconds)
-        word_alignment: Dict[int, AlignedWord] = {}
-        for idx, aligned_word_internal in internal_alignment.items():
-            # Convert frames to seconds
-            start_sec = aligned_word_internal.start_time / frame_rate
-            end_sec = aligned_word_internal.end_time / frame_rate if aligned_word_internal.end_time else start_sec + 0.1
-
-            # Get original word form
-            # Always store original if: word is "*" (unknown), or original differs from normalized
-            original = None
-            if idx < len(original_text_words):
-                orig_word = original_text_words[idx]
-                if aligned_word_internal.word == "*" or orig_word.lower() != aligned_word_internal.word.lower():
-                    original = orig_word
-
-            # Calculate average score from phones
-            score = 0.0
-            if aligned_word_internal.phones:
-                score = sum(p.score for p in aligned_word_internal.phones) / len(aligned_word_internal.phones)
-
-            word_alignment[idx] = AlignedWord(
-                word=aligned_word_internal.word,
-                start=start_sec,
-                end=end_sec,
-                score=score,
-                original=original,
-                index=idx,
-                chars=[],  # Could convert phones to chars if needed
-            )
-
-        return word_alignment
