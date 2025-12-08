@@ -65,6 +65,7 @@ class TorchAudioPipelineBackend(CTCModelBackend):
         super().__init__(config)
         self._bundle = None
         self._labels = None
+        self._add_star_manually = False
 
     def load(self) -> None:
         """Load model from TorchAudio pipeline."""
@@ -87,13 +88,16 @@ class TorchAudioPipelineBackend(CTCModelBackend):
         if hasattr(self._bundle, 'get_model'):
             if self._is_mms_fa(model_name):
                 # MMS_FA has special with_star parameter
-                # with_star=False means the model will NOT include star in output
-                # So we pass the opposite of our config
+                # IMPORTANT: Always load with with_star=False to avoid torchaudio's
+                # batched inference bug where star_dim is created with wrong batch size.
+                # We add the star dimension ourselves in get_emissions() instead.
                 self._model = self._bundle.get_model(
-                    with_star=self.config.with_star
+                    with_star=False
                 ).to(device)
+                self._add_star_manually = self.config.with_star
             else:
                 self._model = self._bundle.get_model().to(device)
+                self._add_star_manually = False
         else:
             raise ValueError(f"Pipeline {model_name} does not have get_model()")
 
@@ -258,8 +262,9 @@ class TorchAudioPipelineBackend(CTCModelBackend):
                 lengths.to(device),
             )
 
-        # Add star dimension if requested and not already present
-        if self.config.with_star and self._vocab_info.unk_id is None:
+        # Add star dimension if requested
+        # We always add it manually for MMS_FA to avoid torchaudio's batched inference bug
+        if self._add_star_manually:
             star_dim = torch.full(
                 (emissions.shape[0], emissions.shape[1], 1),
                 -5.0,  # Low probability for unknown
