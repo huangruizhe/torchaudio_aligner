@@ -124,6 +124,26 @@ class AlignedWord:
         """Alias for score (confidence score 0-1)."""
         return self.score
 
+    @property
+    def display_text(self) -> str:
+        """
+        User-friendly display text showing original form when available.
+
+        Returns original word form, with normalized form in parentheses
+        if they differ. This is the recommended way to display words to users.
+
+        Examples:
+            - Normal word: "hello"
+            - With original: "Meta's (metas)"
+            - Unknown word: "你好 (*)"
+
+        Returns:
+            Formatted string for display to users
+        """
+        if self.original and self.original != self.word:
+            return f"{self.original} ({self.word})"
+        return self.word
+
     def to_dict(self, include_chars: bool = False) -> Dict[str, Any]:
         """Convert to dictionary."""
         d = {
