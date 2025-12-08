@@ -452,7 +452,7 @@ def align_long_audio(
     )
 
     if verbose:
-        logger.info(f"  Aligned words: {len(word_alignments)}")
+        logger.info(f"  Aligned words: {len(word_alignments)} / {len(text_words)} ({100*len(word_alignments)/len(text_words):.1f}%)")
 
     # =========================================================================
     # Step 8: Placeholder for second-pass refinement
