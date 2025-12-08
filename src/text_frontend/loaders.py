@@ -244,8 +244,12 @@ def load_text_from_pdf_ocr(
     logger.info(f"Converted {len(images)} pages to images")
 
     # Initialize EasyOCR reader
+    # Use CPU mode to avoid CUDA conflicts with the main acoustic model
+    # EasyOCR may still try to detect CUDA, so we suppress that
     logger.info(f"Initializing EasyOCR with languages: {languages}")
-    reader = easyocr.Reader(languages, gpu=False)  # CPU by default for compatibility
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES'] = os.environ.get('CUDA_VISIBLE_DEVICES', '')  # Preserve existing setting
+    reader = easyocr.Reader(languages, gpu=False, verbose=False)
 
     text_parts = []
     for i, image in enumerate(images):
