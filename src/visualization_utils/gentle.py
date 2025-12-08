@@ -265,6 +265,44 @@ def _build_gentle_html(
     return html
 
 
+def get_gentle_visualization_from_words(
+    words: List[Any],  # List of WordTimestamp objects
+    audio_file: Optional[Union[str, Path]] = None,
+    title: str = "TorchAudio Aligner - Alignment Visualization",
+) -> str:
+    """
+    Generate Gentle-style HTML visualization from WordTimestamp list.
+
+    This is the simplified version that works with the new WordTimestamp API.
+    Times are already in seconds, no frame conversion needed.
+
+    Args:
+        words: List of WordTimestamp objects (with text, start, end in seconds)
+        audio_file: Path to audio file (optional)
+        title: Page title
+
+    Returns:
+        HTML content string
+    """
+    # Build word data from WordTimestamp objects
+    words_data = []
+    for word in words:
+        # Use original form if available, otherwise normalized text
+        display_text = word.original if word.original else word.text
+        word_info = {
+            "word": display_text,
+            "index": word.index,
+            "aligned": True,  # All words in the list are aligned
+            "start": word.start,
+            "end": word.end,
+        }
+        words_data.append(word_info)
+
+    # Build HTML
+    html = _build_gentle_html(words_data, audio_file, title)
+    return html
+
+
 def save_gentle_html(
     word_alignment: Dict[int, Any],
     text: str,

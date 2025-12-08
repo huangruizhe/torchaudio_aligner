@@ -8,33 +8,55 @@ This module provides a unified interface that combines:
 - Alignment (WFST-based flexible alignment)
 - Stitching utils (LIS-based segment concatenation)
 
-The implementation follows the pattern from Tutorial.py, using:
-- align_segments() for segment-wise alignment
-- concat_alignments() for LIS-based stitching
-- get_final_word_alignment() for word-level results
-- second_pass_fa() for refinement (optional)
-
 Usage:
     from torchaudio_aligner import align_long_audio
 
     result = align_long_audio(
         audio="path/to/audio.mp3",
         text="path/to/transcript.pdf",
-        language="eng",
     )
 
-    # Access results
-    for word_idx, word in result.word_alignments.items():
-        print(f"{word.word}: {word.start_seconds:.2f}s - {word.end_seconds:.2f}s")
+    # Simple access - times are in seconds, ready to use
+    for word in result.words:
+        print(f"{word.text}: {word.start:.2f}s - {word.end:.2f}s")
+
+    # Save outputs
+    result.save_audacity_labels("labels.txt")
+    result.save_gentle_html("visualization.html", audio_file="audio.mp3")
 """
 
 from typing import Optional, Union, List, Dict, Any, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import logging
 import torch
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WordTimestamp:
+    """
+    A simple word with start/end timestamps in seconds.
+
+    This is the user-facing class for easy access to alignment results.
+    No frame conversion needed - times are in seconds.
+
+    Attributes:
+        text: The word text (normalized form used for alignment)
+        start: Start time in seconds
+        end: End time in seconds
+        index: Word index in the original text
+        original: Original word form before normalization (if different)
+    """
+    text: str
+    start: float
+    end: float
+    index: int = -1
+    original: Optional[str] = None
+
+    def __repr__(self):
+        return f"WordTimestamp('{self.text}', {self.start:.2f}s-{self.end:.2f}s)"
 
 # Configure logging format
 logfmt = "%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s"
@@ -47,16 +69,70 @@ class LongFormAlignmentResult:
     Result of long-form alignment.
 
     Attributes:
-        word_alignments: Dict mapping word index to AlignedWord
+        word_alignments: Dict mapping word index to AlignedWord (internal, frame-based)
         unaligned_indices: List of (start_idx, end_idx) for unaligned text regions
         token_alignments: List of aligned tokens (optional)
         metadata: Additional info (duration, segments, etc.)
+
+    Properties:
+        words: List of WordTimestamp objects with times in seconds (recommended for users)
     """
     word_alignments: Dict[int, Any]  # word_idx -> AlignedWord
     unaligned_indices: List[Tuple[int, int]]
     token_alignments: Optional[List[Any]] = None
     text_words: Optional[List[str]] = None
+    original_text_words: Optional[List[str]] = None  # Non-normalized words
     metadata: Optional[Dict[str, Any]] = None
+    _words_cache: Optional[List[WordTimestamp]] = field(default=None, repr=False)
+
+    @property
+    def words(self) -> List[WordTimestamp]:
+        """
+        Get aligned words as a simple list with times in seconds.
+
+        This is the recommended way to access alignment results.
+        Returns WordTimestamp objects sorted by start time.
+
+        Example:
+            for word in result.words:
+                print(f"{word.text}: {word.start:.2f}s - {word.end:.2f}s")
+        """
+        if self._words_cache is not None:
+            return self._words_cache
+
+        frame_dur = self.frame_duration
+        words_list = []
+
+        for idx, aligned_word in sorted(self.word_alignments.items()):
+            # Skip None words (end-of-text markers)
+            if aligned_word.word is None:
+                continue
+
+            # Convert frames to seconds
+            start_sec = aligned_word.start_time * frame_dur
+            if aligned_word.end_time is not None:
+                end_sec = aligned_word.end_time * frame_dur
+            else:
+                end_sec = start_sec + 0.5  # Fallback (should rarely happen)
+
+            # Get original word form if available
+            original = None
+            if self.original_text_words and idx < len(self.original_text_words):
+                orig_word = self.original_text_words[idx]
+                if orig_word.lower() != aligned_word.word.lower():
+                    original = orig_word
+
+            words_list.append(WordTimestamp(
+                text=aligned_word.word,
+                start=start_sec,
+                end=end_sec,
+                index=idx,
+                original=original,
+            ))
+
+        # Cache and return
+        object.__setattr__(self, '_words_cache', words_list)
+        return words_list
 
     @property
     def num_aligned_words(self) -> int:
@@ -70,35 +146,21 @@ class LongFormAlignmentResult:
         """Get aligned word by index."""
         return self.word_alignments.get(word_idx)
 
-    def get_words_in_range(self, start_sec: float, end_sec: float) -> List[Any]:
-        """Get all aligned words within a time range."""
-        result = []
-        for word in self.word_alignments.values():
-            if hasattr(word, 'start_seconds'):
-                word_start = word.start_seconds
-            else:
-                word_start = word.start_time * 0.02  # Assume 20ms frame
-            if start_sec <= word_start <= end_sec:
-                result.append(word)
-        return result
+    def get_words_in_range(self, start_sec: float, end_sec: float) -> List[WordTimestamp]:
+        """Get all aligned words within a time range (in seconds)."""
+        return [w for w in self.words if start_sec <= w.start <= end_sec]
 
-    def to_audacity_labels(self, frame_duration: float = 0.02) -> str:
-        """Export to Audacity label format."""
+    def to_audacity_labels(self) -> str:
+        """Export to Audacity label format (times in seconds)."""
         lines = []
-        sorted_words = sorted(self.word_alignments.items())
-        for i, (idx, word) in enumerate(sorted_words):
-            start = word.start_time * frame_duration
-            if i + 1 < len(sorted_words):
-                end = sorted_words[i + 1][1].start_time * frame_duration
-            else:
-                end = start + 0.5  # Default duration for last word
-            lines.append(f"{start:.6f}\t{end:.6f}\t{word.word}")
+        for word in self.words:
+            lines.append(f"{word.start:.6f}\t{word.end:.6f}\t{word.text}")
         return "\n".join(lines)
 
-    def save_audacity_labels(self, output_path: Union[str, Path], frame_duration: float = 0.02) -> str:
+    def save_audacity_labels(self, output_path: Union[str, Path]) -> str:
         """Save alignment as Audacity label file."""
         output_path = Path(output_path)
-        labels = self.to_audacity_labels(frame_duration)
+        labels = self.to_audacity_labels()
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(labels)
         return str(output_path)
@@ -106,18 +168,14 @@ class LongFormAlignmentResult:
     def to_gentle_html(
         self,
         audio_file: Optional[Union[str, Path]] = None,
-        frame_duration: float = 0.02,
         title: str = "TorchAudio Aligner - Alignment Visualization",
     ) -> str:
         """Generate Gentle-style HTML visualization."""
-        from visualization_utils.gentle import get_gentle_visualization
+        from visualization_utils.gentle import get_gentle_visualization_from_words
 
-        text = " ".join(self.text_words) if self.text_words else ""
-        return get_gentle_visualization(
-            self.word_alignments,
-            text,
+        return get_gentle_visualization_from_words(
+            self.words,
             audio_file=audio_file,
-            frame_duration=frame_duration,
             title=title,
         )
 
@@ -125,12 +183,11 @@ class LongFormAlignmentResult:
         self,
         output_path: Union[str, Path],
         audio_file: Optional[Union[str, Path]] = None,
-        frame_duration: float = 0.02,
         title: str = "TorchAudio Aligner - Alignment Visualization",
     ) -> str:
         """Save Gentle-style HTML visualization to file."""
         output_path = Path(output_path)
-        html = self.to_gentle_html(audio_file, frame_duration, title)
+        html = self.to_gentle_html(audio_file, title)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
         return str(output_path)
@@ -300,6 +357,9 @@ def align_long_audio(
     # Normalize text
     if romanize and romanize_language:
         text_content = romanize_text(text_content, language=romanize_language)
+
+    # Keep original words before normalization for display
+    original_text_words = text_content.split()
 
     text_normalized = normalize_for_mms(
         text_content,
@@ -482,6 +542,7 @@ def align_long_audio(
         unaligned_indices=unaligned_indices if unaligned_indices else [],
         token_alignments=resolved_alignment_results,
         text_words=text_words,
+        original_text_words=original_text_words,
         metadata=metadata,
     )
 
