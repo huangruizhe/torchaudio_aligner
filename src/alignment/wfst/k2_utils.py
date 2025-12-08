@@ -668,12 +668,34 @@ def get_final_word_alignment(
     word_alignment = {k: word_alignment[k] for k in sorted(word_alignment.keys())}
 
     # Compute end_time for each word from the next word's start_time
+    # Cap duration to avoid overly long segments when there are gaps
+    max_word_frames = 50  # ~1 second at 20ms/frame - reasonable max for a single word
     sorted_indices = sorted(word_alignment.keys())
     for i, idx in enumerate(sorted_indices):
+        current_word = word_alignment[idx]
+        if hasattr(current_word.start_time, 'item'):
+            current_start = current_word.start_time.item()
+        else:
+            current_start = current_word.start_time
+
         if i + 1 < len(sorted_indices):
             next_idx = sorted_indices[i + 1]
-            word_alignment[idx].end_time = word_alignment[next_idx].start_time
-        # Last word: end_time remains None (or could estimate from last phone)
+            next_word = word_alignment[next_idx]
+            if hasattr(next_word.start_time, 'item'):
+                next_start = next_word.start_time.item()
+            else:
+                next_start = next_word.start_time
+
+            # Use next word's start, but cap if gap is too large
+            duration = next_start - current_start
+            if duration <= max_word_frames:
+                word_alignment[idx].end_time = next_word.start_time
+            else:
+                # Cap at max duration
+                word_alignment[idx].end_time = current_start + max_word_frames
+        else:
+            # Last word: use default duration
+            word_alignment[idx].end_time = current_start + 25  # ~0.5s default
 
     logger.debug(f"Built word alignment: {len(word_alignment)} words")
 
