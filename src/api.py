@@ -27,7 +27,7 @@ import logging
 import torch
 
 # Import from base - these are the primary user-facing classes
-from alignment.base import AlignmentResult, AlignedWord, AlignedToken, AlignmentConfig
+from alignment.base import AlignmentResult, AlignedWord, AlignedChar, AlignedToken, AlignmentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ __all__ = [
     "align_long_audio",
     "AlignmentResult",
     "AlignedWord",
+    "AlignedChar",
     "AlignmentConfig",
 ]
 
