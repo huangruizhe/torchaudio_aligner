@@ -58,7 +58,7 @@ def align_long_audio(
     # Alignment parameters
     skip_penalty: float = -0.5,
     return_penalty: float = -18.0,
-    batch_size: int = 32,
+    batch_size: int = 16,  # Reduced from 32 to avoid OOM on smaller GPUs
     # Text parameters
     expand_numbers: bool = True,
     romanize: bool = False,
@@ -102,6 +102,10 @@ def align_long_audio(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
+
+    # Clear GPU cache before starting (helps when running multiple alignments)
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
 
     frame_duration = 0.02  # 20ms frames (standard for MMS-FA)
 
