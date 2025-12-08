@@ -679,7 +679,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     # Interactive Demo
     # -------------------------------------------------------------------------
 
-    def create_interactive_demo(self, output_dir: str, title: str = None) -> str:
+    def create_interactive_demo(
+        self,
+        text: str,
+        audio_file: str,
+        output_dir: str,
+        title: str = None,
+    ) -> str:
         """
         Create an interactive HTML demo with clickable word audio clips.
 
@@ -693,6 +699,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         - Modern UI with statistics
 
         Args:
+            text: The text transcript (normalized or original)
+            audio_file: Path to the audio file
             output_dir: Directory to save demo files
             title: Optional title for the demo page
 
@@ -701,28 +709,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         Example:
             >>> result = align_long_audio("audio.mp3", "text.txt", language="eng")
-            >>> result.create_interactive_demo("demo_output/")
+            >>> result.create_interactive_demo(text_normalized, "audio.mp3", "demo_output/")
             >>> # Open demo_output/index.html in browser
-
-        Raises:
-            ValueError: If audio_file not in metadata (need to use align_long_audio)
         """
-        # Check required metadata
-        audio_file = self.metadata.get("audio_file")
-        if not audio_file:
-            raise ValueError(
-                "audio_file not found in metadata. "
-                "Use align_long_audio() to get results with this method enabled."
-            )
-
         # Build title if not provided
         if title is None:
             title = "TorchAudio Aligner - Interactive Demo"
             if "language" in self.metadata:
                 title = f"{title} ({self.metadata['language']})"
-
-        # Use original_text if available, otherwise reconstruct from words
-        text = self.metadata.get("original_text", " ".join(w.word for w in self.words))
 
         # Build word_alignment dict from words list
         word_alignment = {w.index: w for w in self.words}

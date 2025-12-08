@@ -356,17 +356,12 @@ def align_long_audio(
     # =========================================================================
     # Build result
     # =========================================================================
-    # Store audio_file path for create_interactive_demo()
-    audio_file_path = str(audio) if isinstance(audio, (str, Path)) else None
-
     metadata = {
         "audio_duration": segmentation.original_duration_seconds,
         "num_segments": segmentation.num_segments,
         "total_words": len(text_words),
         "model": model_name,
         "language": language,
-        "audio_file": audio_file_path,
-        "original_text": text_content,
     }
 
     result = AlignmentResult(
