@@ -178,21 +178,26 @@ def align_long_audio(
     from text_frontend import load_text_from_pdf, load_text_from_pdf_ocr, load_text_from_url, normalize_for_mms, romanize_text_aligned
     from text_frontend.romanization import preprocess_cjk
 
-    # Map language codes to EasyOCR language codes for OCR fallback
-    LANG_TO_OCR = {
-        "hin": ["hi", "en"],  # Hindi
-        "ara": ["ar", "en"],  # Arabic
-        "tha": ["th", "en"],  # Thai
-        "jpn": ["ja", "en"], "ja": ["ja", "en"],  # Japanese
-        "kor": ["ko", "en"], "ko": ["ko", "en"],  # Korean
-        "cmn": ["ch_sim", "en"], "zh": ["ch_sim", "en"],  # Chinese Simplified
-        "yue": ["ch_tra", "en"],  # Chinese Traditional (Cantonese)
-        "rus": ["ru", "en"],  # Russian
-        "ben": ["bn", "en"],  # Bengali
-        "tam": ["ta", "en"],  # Tamil
-        "tel": ["te", "en"],  # Telugu
-        "kan": ["kn", "en"],  # Kannada
-        "mal": ["ml", "en"],  # Malayalam
+    # Map ISO 639-3 language codes to Tesseract language codes for OCR fallback
+    # See: https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html
+    LANG_TO_TESSERACT = {
+        "hin": "hin+eng",  # Hindi
+        "ara": "ara+eng",  # Arabic
+        "tha": "tha+eng",  # Thai
+        "jpn": "jpn+eng", "ja": "jpn+eng",  # Japanese
+        "kor": "kor+eng", "ko": "kor+eng",  # Korean
+        "cmn": "chi_sim+eng", "zh": "chi_sim+eng",  # Chinese Simplified
+        "yue": "chi_tra+eng",  # Chinese Traditional (Cantonese)
+        "rus": "rus+eng",  # Russian
+        "ben": "ben+eng",  # Bengali
+        "tam": "tam+eng",  # Tamil
+        "tel": "tel+eng",  # Telugu
+        "kan": "kan+eng",  # Kannada
+        "mal": "mal+eng",  # Malayalam
+        "por": "por+eng",  # Portuguese
+        "spa": "spa+eng",  # Spanish
+        "fra": "fra+eng",  # French
+        "deu": "deu+eng",  # German
     }
 
     if isinstance(text, Path):
@@ -208,15 +213,16 @@ def align_long_audio(
             text_content = load_text_from_pdf(text)
             # Check if PDF extraction returned meaningful text
             if len(text_content.strip()) < 100 or len(text_content.split()) < 20:
-                # Try OCR fallback
-                ocr_langs = LANG_TO_OCR.get(language, ["en"])
+                # Try OCR fallback using Tesseract (CPU-only, no CUDA conflicts)
+                ocr_lang = LANG_TO_TESSERACT.get(language, "eng")
                 if verbose:
-                    logger.info(f"  PDF text extraction returned minimal content, trying OCR with languages: {ocr_langs}")
+                    logger.info(f"  PDF text extraction returned minimal content, trying OCR with language: {ocr_lang}")
                 try:
-                    text_content = load_text_from_pdf_ocr(text, languages=ocr_langs, fallback_to_text=False)
+                    text_content = load_text_from_pdf_ocr(text, language=ocr_lang, fallback_to_text=False)
                 except ImportError as e:
                     logger.warning(f"  OCR not available: {e}")
-                    logger.warning(f"  Install with: pip install easyocr pdf2image && apt install poppler-utils")
+                    logger.warning(f"  Install with: pip install pytesseract pdf2image")
+                    logger.warning(f"  Also: apt install tesseract-ocr tesseract-ocr-{language.split('+')[0]} poppler-utils")
             if verbose:
                 logger.info(f"  PDF: {text}")
         elif text.endswith('.txt'):

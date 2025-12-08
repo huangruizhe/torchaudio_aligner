@@ -38,33 +38,21 @@ try:
 except ImportError:
     PdfReader = None
 
-# Lazy imports for OCR - these can conflict with CUDA if imported early
-_OCR_AVAILABLE = None  # Will be checked lazily
-_PDF2IMAGE_AVAILABLE = None  # Will be checked lazily
+# Check for pytesseract (CPU-only OCR, no CUDA conflicts)
+_TESSERACT_AVAILABLE = False
+_PDF2IMAGE_AVAILABLE = False
 
+try:
+    import pytesseract
+    _TESSERACT_AVAILABLE = True
+except ImportError:
+    pytesseract = None
 
-def _check_ocr_available():
-    """Lazily check if OCR dependencies are available."""
-    global _OCR_AVAILABLE
-    if _OCR_AVAILABLE is None:
-        try:
-            import easyocr
-            _OCR_AVAILABLE = True
-        except ImportError:
-            _OCR_AVAILABLE = False
-    return _OCR_AVAILABLE
-
-
-def _check_pdf2image_available():
-    """Lazily check if pdf2image is available."""
-    global _PDF2IMAGE_AVAILABLE
-    if _PDF2IMAGE_AVAILABLE is None:
-        try:
-            from pdf2image import convert_from_path
-            _PDF2IMAGE_AVAILABLE = True
-        except ImportError:
-            _PDF2IMAGE_AVAILABLE = False
-    return _PDF2IMAGE_AVAILABLE
+try:
+    from pdf2image import convert_from_path
+    _PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    convert_from_path = None
 
 
 def load_text_from_file(file_path: Union[str, Path], encoding: str = "utf-8") -> str:
@@ -179,23 +167,29 @@ def load_text_from_pdf(pdf_path: Union[str, Path]) -> str:
 
 def load_text_from_pdf_ocr(
     pdf_path: Union[str, Path],
-    languages: List[str] = None,
+    language: str = "eng",
     dpi: int = 300,
     fallback_to_text: bool = True,
 ) -> str:
     """
-    Extract text from a scanned/image-based PDF using OCR.
+    Extract text from a scanned/image-based PDF using OCR (Tesseract).
 
     This is useful for PDFs that contain scanned images instead of text
     (common for Hindi, historical documents, etc.).
 
-    Requires: pip install easyocr pdf2image
-    Also requires poppler-utils system package for pdf2image.
+    Uses pytesseract (CPU-only) to avoid CUDA conflicts with the acoustic model.
+
+    Requires:
+        pip install pytesseract pdf2image
+        apt install tesseract-ocr poppler-utils
+        # For Hindi: apt install tesseract-ocr-hin
+        # For other languages: apt install tesseract-ocr-<lang>
 
     Args:
         pdf_path: Path to PDF file
-        languages: List of language codes for EasyOCR (e.g., ['en'], ['hi', 'en'])
-            Default: ['en']
+        language: Tesseract language code (e.g., 'eng', 'hin', 'jpn', 'chi_sim')
+            Use '+' for multiple: 'hin+eng'
+            Default: 'eng'
         dpi: Resolution for PDF to image conversion (higher = better quality but slower)
         fallback_to_text: If True, try text extraction first, use OCR only if empty
 
@@ -204,28 +198,27 @@ def load_text_from_pdf_ocr(
 
     Example:
         >>> # For Hindi scanned PDF
-        >>> text = load_text_from_pdf_ocr("hindi_document.pdf", languages=['hi', 'en'])
+        >>> text = load_text_from_pdf_ocr("hindi_document.pdf", language='hin+eng')
 
         >>> # For English scanned PDF
-        >>> text = load_text_from_pdf_ocr("scanned_book.pdf", languages=['en'])
+        >>> text = load_text_from_pdf_ocr("scanned_book.pdf", language='eng')
     """
-    if not _check_pdf2image_available():
+    if not _PDF2IMAGE_AVAILABLE:
         raise ImportError(
             "pdf2image is required for OCR. Install with: pip install pdf2image\n"
-            "Also install poppler-utils: brew install poppler (macOS) or apt install poppler-utils (Linux)"
+            "Also install poppler-utils: apt install poppler-utils (Linux) or brew install poppler (macOS)"
         )
-    if not _check_ocr_available():
-        raise ImportError("easyocr is required for OCR. Install with: pip install easyocr")
-
-    # Import lazily to avoid CUDA conflicts
-    import easyocr
-    from pdf2image import convert_from_path
+    if not _TESSERACT_AVAILABLE:
+        raise ImportError(
+            "pytesseract is required for OCR. Install with:\n"
+            "  pip install pytesseract\n"
+            "  apt install tesseract-ocr  # Linux\n"
+            "  brew install tesseract     # macOS"
+        )
 
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
-
-    languages = languages or ['en']
 
     # Try text extraction first if fallback enabled
     if fallback_to_text:
@@ -243,22 +236,13 @@ def load_text_from_pdf_ocr(
     images = convert_from_path(str(pdf_path), dpi=dpi)
     logger.info(f"Converted {len(images)} pages to images")
 
-    # Initialize EasyOCR reader
-    # Use CPU mode to avoid CUDA conflicts with the main acoustic model
-    # EasyOCR may still try to detect CUDA, so we suppress that
-    logger.info(f"Initializing EasyOCR with languages: {languages}")
-    import os
-    os.environ['CUDA_VISIBLE_DEVICES'] = os.environ.get('CUDA_VISIBLE_DEVICES', '')  # Preserve existing setting
-    reader = easyocr.Reader(languages, gpu=False, verbose=False)
+    # Use pytesseract (CPU-only, no CUDA conflicts)
+    logger.info(f"Running Tesseract OCR with language: {language}")
 
     text_parts = []
     for i, image in enumerate(images):
         logger.info(f"OCR processing page {i+1}/{len(images)}")
-        # EasyOCR expects numpy array or file path
-        import numpy as np
-        image_np = np.array(image)
-        results = reader.readtext(image_np, detail=0)  # detail=0 returns text only
-        page_text = " ".join(results)
+        page_text = pytesseract.image_to_string(image, lang=language)
         text_parts.append(page_text)
 
     text = " ".join(text_parts)
@@ -300,5 +284,5 @@ def get_available_loaders() -> dict:
         "file": True,
         "url": _REQUESTS_AVAILABLE and _BS4_AVAILABLE,
         "pdf": _PYPDF_AVAILABLE,
-        "ocr": _check_ocr_available() and _check_pdf2image_available(),
+        "ocr": _TESSERACT_AVAILABLE and _PDF2IMAGE_AVAILABLE,
     }
