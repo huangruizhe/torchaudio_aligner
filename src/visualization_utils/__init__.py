@@ -24,6 +24,7 @@ from .audacity import (
 from .gentle import (
     get_gentle_visualization,
     save_gentle_html,
+    create_interactive_demo,
 )
 
 from .audio_preview import (
@@ -45,6 +46,7 @@ __all__ = [
     # Gentle
     "get_gentle_visualization",
     "save_gentle_html",
+    "create_interactive_demo",
     # Audio preview (new API)
     "preview_word_seconds",
     "preview_segment_seconds",
