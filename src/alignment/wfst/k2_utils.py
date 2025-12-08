@@ -585,6 +585,101 @@ def concat_alignments(
 # Final word alignment (following Tutorial.py get_final_word_alignment)
 # =============================================================================
 
+def _compute_word_end_times(
+    word_alignment: Dict[int, AlignedWord],
+    text_splitted: List[str],
+    max_word_frames: int = 50,
+    default_frames_per_char: float = 2.5,
+    min_word_frames: int = 5,
+) -> None:
+    """
+    Compute end_time for each word using smart duration estimation.
+
+    Strategy:
+    1. Compute average frames per character from words with known durations
+    2. For words where next word is close, use next word's start_time
+    3. For words with gaps (or last word), estimate duration based on char count
+    4. Cap all durations at max_word_frames
+
+    Args:
+        word_alignment: Dict mapping word index to AlignedWord (modified in-place)
+        text_splitted: List of words from original text
+        max_word_frames: Maximum duration for any word (~1s at 20ms/frame)
+        default_frames_per_char: Fallback if no stats available (~50ms/char)
+        min_word_frames: Minimum duration for any word (~100ms)
+    """
+    if not word_alignment:
+        return
+
+    sorted_indices = sorted(word_alignment.keys())
+
+    # Helper to get start time as float
+    def get_start(word):
+        if hasattr(word.start_time, 'item'):
+            return word.start_time.item()
+        return word.start_time
+
+    # Step 1: Compute average frames per character from consecutive word pairs
+    char_durations = []
+    for i in range(len(sorted_indices) - 1):
+        idx = sorted_indices[i]
+        next_idx = sorted_indices[i + 1]
+        current_word = word_alignment[idx]
+        next_word = word_alignment[next_idx]
+
+        if current_word.word is None:
+            continue
+
+        current_start = get_start(current_word)
+        next_start = get_start(next_word)
+        duration = next_start - current_start
+
+        # Only use reasonable durations for statistics
+        if 0 < duration <= max_word_frames:
+            num_chars = len(current_word.word)
+            if num_chars > 0:
+                char_durations.append(duration / num_chars)
+
+    # Compute average frames per character
+    if char_durations:
+        avg_frames_per_char = sum(char_durations) / len(char_durations)
+    else:
+        avg_frames_per_char = default_frames_per_char
+
+    logger.debug(f"Estimated {avg_frames_per_char:.2f} frames/char from {len(char_durations)} samples")
+
+    # Step 2: Set end_time for each word
+    for i, idx in enumerate(sorted_indices):
+        current_word = word_alignment[idx]
+        current_start = get_start(current_word)
+
+        if i + 1 < len(sorted_indices):
+            next_idx = sorted_indices[i + 1]
+            next_word = word_alignment[next_idx]
+            next_start = get_start(next_word)
+            gap = next_start - current_start
+
+            if gap <= max_word_frames:
+                # Next word is close enough, use its start
+                word_alignment[idx].end_time = next_word.start_time
+            else:
+                # Large gap - estimate duration from char count
+                if current_word.word is not None:
+                    estimated = int(len(current_word.word) * avg_frames_per_char)
+                    estimated = max(min_word_frames, min(estimated, max_word_frames))
+                else:
+                    estimated = min_word_frames
+                word_alignment[idx].end_time = current_start + estimated
+        else:
+            # Last word - estimate duration from char count
+            if current_word.word is not None:
+                estimated = int(len(current_word.word) * avg_frames_per_char)
+                estimated = max(min_word_frames, min(estimated, max_word_frames))
+            else:
+                estimated = min_word_frames
+            word_alignment[idx].end_time = current_start + estimated
+
+
 def get_final_word_alignment(
     alignment_results: List[AlignedToken],
     text: str,
@@ -667,35 +762,8 @@ def get_final_word_alignment(
     # Sort by word index for consistent output
     word_alignment = {k: word_alignment[k] for k in sorted(word_alignment.keys())}
 
-    # Compute end_time for each word from the next word's start_time
-    # Cap duration to avoid overly long segments when there are gaps
-    max_word_frames = 50  # ~1 second at 20ms/frame - reasonable max for a single word
-    sorted_indices = sorted(word_alignment.keys())
-    for i, idx in enumerate(sorted_indices):
-        current_word = word_alignment[idx]
-        if hasattr(current_word.start_time, 'item'):
-            current_start = current_word.start_time.item()
-        else:
-            current_start = current_word.start_time
-
-        if i + 1 < len(sorted_indices):
-            next_idx = sorted_indices[i + 1]
-            next_word = word_alignment[next_idx]
-            if hasattr(next_word.start_time, 'item'):
-                next_start = next_word.start_time.item()
-            else:
-                next_start = next_word.start_time
-
-            # Use next word's start, but cap if gap is too large
-            duration = next_start - current_start
-            if duration <= max_word_frames:
-                word_alignment[idx].end_time = next_word.start_time
-            else:
-                # Cap at max duration
-                word_alignment[idx].end_time = current_start + max_word_frames
-        else:
-            # Last word: use default duration
-            word_alignment[idx].end_time = current_start + 25  # ~0.5s default
+    # Compute end_time for each word using smart duration estimation
+    _compute_word_end_times(word_alignment, text_splitted)
 
     logger.debug(f"Built word alignment: {len(word_alignment)} words")
 
