@@ -12,7 +12,7 @@ Tests cover:
 import pytest
 
 # Import markers from conftest
-from conftest import TORCH_AVAILABLE
+from test_utils import TORCH_AVAILABLE
 
 # Skip entire module if torch not available
 pytestmark = pytest.mark.skipif(

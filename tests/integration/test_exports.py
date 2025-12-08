@@ -15,7 +15,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from conftest import requires_torch
+from test_utils import requires_torch
 
 
 class TestAudacityExport:

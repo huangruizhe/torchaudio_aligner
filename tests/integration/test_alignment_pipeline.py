@@ -18,7 +18,7 @@ Key API:
 import pytest
 
 # Import markers from conftest
-from conftest import TORCH_AVAILABLE, requires_k2, requires_lis, requires_k2_and_lis
+from test_utils import TORCH_AVAILABLE, requires_k2, requires_lis, requires_k2_and_lis
 
 # Skip entire module if torch not available
 pytestmark = pytest.mark.skipif(

@@ -21,6 +21,11 @@ src_path = Path(__file__).parent.parent / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
+# Also add tests path for importing test_utils
+tests_path = Path(__file__).parent.parent / "tests"
+if str(tests_path) not in sys.path:
+    sys.path.insert(0, str(tests_path))
+
 # Remove the root project path if it was added (to avoid root __init__.py imports)
 root_path = str(Path(__file__).parent.parent)
 if root_path in sys.path:
@@ -28,48 +33,24 @@ if root_path in sys.path:
 
 
 # =============================================================================
-# Dependency availability markers
+# Import from test_utils (shared module)
 # =============================================================================
 
-def check_k2_available():
-    try:
-        import k2
-        return True
-    except ImportError:
-        return False
-
-
-def check_lis_available():
-    try:
-        import lis
-        return True
-    except ImportError:
-        return False
-
-
-def check_torch_available():
-    try:
-        import torch
-        return True
-    except ImportError:
-        return False
-
-
-K2_AVAILABLE = check_k2_available()
-LIS_AVAILABLE = check_lis_available()
-TORCH_AVAILABLE = check_torch_available()
-
-# Pytest markers for skipping tests
-requires_k2 = pytest.mark.skipif(not K2_AVAILABLE, reason="k2 not installed")
-requires_lis = pytest.mark.skipif(not LIS_AVAILABLE, reason="lis not installed")
-requires_torch = pytest.mark.skipif(not TORCH_AVAILABLE, reason="torch not installed")
-requires_k2_and_lis = pytest.mark.skipif(
-    not (K2_AVAILABLE and LIS_AVAILABLE),
-    reason="k2 and/or lis not installed"
+from test_utils import (
+    TORCH_AVAILABLE,
+    K2_AVAILABLE,
+    LIS_AVAILABLE,
+    requires_torch,
+    requires_k2,
+    requires_lis,
+    requires_k2_and_lis,
 )
 
-# Skip entire test collection if torch not available
-# This is because alignment.base imports torch at module level
+
+# =============================================================================
+# Pytest configuration
+# =============================================================================
+
 def pytest_configure(config):
     """Configure pytest with custom markers."""
     config.addinivalue_line(

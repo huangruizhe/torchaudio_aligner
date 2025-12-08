@@ -15,7 +15,7 @@ Tests cover:
 import pytest
 
 # Import markers from conftest
-from conftest import TORCH_AVAILABLE, requires_lis
+from test_utils import TORCH_AVAILABLE, requires_lis
 
 # Skip entire module if torch not available
 pytestmark = pytest.mark.skipif(

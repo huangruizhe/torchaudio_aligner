@@ -13,7 +13,7 @@ so we test the underlying logic without requiring IPython.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from conftest import requires_torch
+from test_utils import requires_torch
 
 
 class TestAudioPreviewHelpers:

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Import markers from conftest
-from conftest import requires_k2, requires_lis, requires_k2_and_lis, requires_torch
+from test_utils import requires_k2, requires_lis, requires_k2_and_lis, requires_torch
 
 
 class TestWFSTAlignerImport:
