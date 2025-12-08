@@ -595,7 +595,7 @@ def concat_alignments(
 # =============================================================================
 
 def _compute_word_end_times(
-    word_alignment: Dict[int, AlignedWord],
+    word_alignment: Dict[int, AlignedWordInternal],
     text_splitted: List[str],
     max_word_frames: int = 50,
     default_frames_per_char: float = 2.5,
@@ -611,7 +611,7 @@ def _compute_word_end_times(
     4. Cap all durations at max_word_frames
 
     Args:
-        word_alignment: Dict mapping word index to AlignedWord (modified in-place)
+        word_alignment: Dict mapping word index to AlignedWordInternal (modified in-place)
         text_splitted: List of words from original text
         max_word_frames: Maximum duration for any word (~1s at 20ms/frame)
         default_frames_per_char: Fallback if no stats available (~50ms/char)
@@ -693,12 +693,12 @@ def get_final_word_alignment(
     alignment_results: List[AlignedToken],
     text: str,
     tokenizer,
-) -> Dict[int, AlignedWord]:
+) -> Dict[int, AlignedWordInternal]:
     """
     Convert token-level alignment to word-level alignment (follows Tutorial.py pattern).
 
-    Groups consecutive tokens by word index and creates AlignedWord objects
-    with start times and phone-level details.
+    Groups consecutive tokens by word index and creates AlignedWordInternal objects
+    with start times (in FRAMES) and phone-level details.
 
     Args:
         alignment_results: List of AlignedToken from concat_alignments
@@ -706,8 +706,8 @@ def get_final_word_alignment(
         tokenizer: Tokenizer with id2token mapping (or similar interface)
 
     Returns:
-        Dict mapping word index (int) to AlignedWord object.
-        Keys are sorted in ascending order.
+        Dict mapping word index (int) to AlignedWordInternal object.
+        Keys are sorted in ascending order. Times are in FRAMES, not seconds.
 
     Note:
         End times are not computed here - they should be derived from
@@ -738,7 +738,7 @@ def get_final_word_alignment(
             else:
                 word = text_splitted[word_idx]
 
-            aligned_word = AlignedWord(
+            aligned_word = AlignedWordInternal(
                 word=word,
                 start_time=aligned_token.timestamp,
                 end_time=None,
