@@ -297,20 +297,26 @@ class AlignedToken:
 
 
 @dataclass
-class AlignedWord:
+class AlignedWordInternal:
     """
-    A word-level alignment result.
+    Internal word-level alignment result (in FRAMES, not seconds).
+
+    NOTE: This is an INTERNAL class used during alignment processing.
+    The user-facing class is `AlignedWord` in alignment/base.py which
+    uses seconds instead of frames.
 
     Attributes:
-        word: The word text
+        word: The word text (normalized form)
         start_time: Start frame index
         end_time: End frame index (or None)
         phones: List of phone-level alignments
+        original: Original word form before normalization (if different)
     """
     word: str
     start_time: int
     end_time: Optional[int] = None
     phones: List = field(default_factory=list)
+    original: Optional[str] = None
 
 
 # =============================================================================
