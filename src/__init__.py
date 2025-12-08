@@ -39,8 +39,10 @@ from . import visualization_utils
 from .api import (
     align_long_audio,
     LongFormAlignmentResult,
-    second_pass_refinement,
-    Aligner,
+    AlignmentResult,
+    AlignedWord,
+    AlignedChar,
+    AlignmentConfig,
 )
 
 __all__ = [
@@ -51,12 +53,13 @@ __all__ = [
     "alignment",
     "stitching_utils",
     "visualization_utils",
-    # High-level API (functional)
+    # High-level API
     "align_long_audio",
-    "LongFormAlignmentResult",
-    "second_pass_refinement",
-    # High-level API (fluent)
-    "Aligner",
+    "AlignmentResult",
+    "LongFormAlignmentResult",  # Backwards compatibility alias
+    "AlignedWord",
+    "AlignedChar",
+    "AlignmentConfig",
 ]
 
 # Version
