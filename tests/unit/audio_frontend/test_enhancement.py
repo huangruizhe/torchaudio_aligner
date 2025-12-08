@@ -23,6 +23,27 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _can_save_audio():
+    """Check if torchaudio can save audio files in this environment."""
+    try:
+        import torch
+        import torchaudio
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+            waveform = torch.randn(1, 1000)
+            torchaudio.save(f.name, waveform, 16000)
+        return True
+    except Exception:
+        return False
+
+
+CAN_SAVE_AUDIO = _can_save_audio()
+requires_audio_save = pytest.mark.skipif(
+    not CAN_SAVE_AUDIO,
+    reason="torchaudio.save() not working (may need torchcodec or soundfile backend)"
+)
+
+
 class TestTimeMappingManager:
     """Tests for TimeMappingManager (timestamp recovery after silence removal)."""
 
@@ -356,6 +377,7 @@ class TestAudioEnhancementNoisereduce:
 class TestAudioEnhancementEnhancePipeline:
     """Tests for full enhance() pipeline."""
 
+    @requires_audio_save
     def test_enhance_returns_result(self, tmp_path):
         """Test that enhance() returns EnhancementResult."""
         import torch
@@ -425,6 +447,7 @@ class TestAudioEnhancementEnhancePipeline:
 class TestConvenienceFunctions:
     """Tests for convenience functions."""
 
+    @requires_audio_save
     def test_enhance_audio_function(self, tmp_path):
         """Test enhance_audio convenience function."""
         import torch

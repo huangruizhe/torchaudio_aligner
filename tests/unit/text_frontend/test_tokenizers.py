@@ -23,6 +23,22 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _check_unidecode_available():
+    """Check if unidecode is available for accent normalization."""
+    try:
+        from unidecode import unidecode
+        return True
+    except ImportError:
+        return False
+
+
+UNIDECODE_AVAILABLE = _check_unidecode_available()
+requires_unidecode = pytest.mark.skipif(
+    not UNIDECODE_AVAILABLE,
+    reason="unidecode not installed (needed for accent normalization)"
+)
+
+
 # Common MMS-style vocabulary for tests
 MMS_VOCAB = {c: i for i, c in enumerate(
     ['-', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
@@ -183,6 +199,7 @@ class TestCharTokenizerNormalization:
         result = tokenizer.normalize_for_vocab("Meta's")
         assert result == "meta's"
 
+    @requires_unidecode
     def test_normalize_for_vocab_handles_accents(self):
         """Test normalize_for_vocab handles accented characters."""
         from text_frontend.tokenizers import CharTokenizer

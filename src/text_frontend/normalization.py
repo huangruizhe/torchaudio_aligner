@@ -63,6 +63,9 @@ _RE_DECIMAL = re.compile(r'^\d+\.\d+$')
 _RE_ORDINAL = re.compile(r'^(\d+)(st|nd|rd|th)$', re.IGNORECASE)
 _RE_COMMA_NUM = re.compile(r'^[\d,]+$')
 
+# Scale words for currency (e.g., "$3 billion" -> "3 billion dollars")
+_SCALE_WORDS = {"hundred", "thousand", "million", "billion", "trillion", "quadrillion"}
+
 
 def _num2words_safe(num, lang="en", to="cardinal"):
     """Wrapper for num2words with error handling."""
@@ -205,6 +208,70 @@ def expand_number(
     return expanded
 
 
+def _expand_currency_scale(
+    words: list,
+    index: int,
+    language: str,
+    word_joiner: Optional[str],
+) -> Optional[tuple]:
+    """
+    Expand currency + scale patterns like "$3 billion" -> "three billiondollars".
+
+    Args:
+        words: List of words
+        index: Current word index
+        language: Language code
+        word_joiner: Joiner for multi-word outputs
+
+    Returns:
+        (expanded_current, expanded_next, skip_next) or None if no match
+
+    Examples:
+        "$3 billion" -> ("three", "billiondollars", True)
+        "€5.2 million" -> ("fivepointtwo", "millioneuros", True)
+    """
+    if index + 1 >= len(words):
+        return None
+
+    word = words[index]
+    next_word_raw = words[index + 1]
+    next_word = next_word_raw.lower().rstrip(string.punctuation)
+
+    # Check for currency symbol followed by scale word
+    currency_match = None
+    for symbol, names in _CURRENCY_SYMBOLS.items():
+        if word.startswith(symbol):
+            currency_match = (symbol, names)
+            break
+
+    if not currency_match or next_word not in _SCALE_WORDS:
+        return None
+
+    symbol, names = currency_match
+    num_part = word[len(symbol):]  # e.g., "3" from "$3"
+    _, plural, _, _ = names  # Use plural form (dollars, euros, etc.)
+
+    # Expand the number part
+    num_expanded = None
+    if num_part.replace(",", "").replace(".", "").isdigit():
+        if "." in num_part:
+            num_expanded = _num2words_safe(float(num_part), language)
+        else:
+            num_expanded = _num2words_safe(int(num_part.replace(",", "")), language)
+
+    if num_expanded is None:
+        return None
+
+    # Apply word joiner to number expansion
+    if word_joiner is not None:
+        num_expanded = num_expanded.replace(" ", word_joiner).replace("-", word_joiner)
+
+    # Combine scale word + currency: "billion" + "dollars" -> "billiondollars"
+    scale_currency = next_word + plural
+
+    return (num_expanded, scale_currency, True)
+
+
 def expand_numbers_in_text(
     text: str,
     language: str = "en",
@@ -212,6 +279,9 @@ def expand_numbers_in_text(
 ) -> str:
     """
     Expand all numbers in text using num2words library.
+
+    Handles special patterns for English:
+    - "$3 billion" -> "three billiondollars" (currency + scale word)
 
     Args:
         text: Input text
@@ -225,7 +295,24 @@ def expand_numbers_in_text(
         return text
 
     words = text.split()
-    expanded_words = [expand_number(w, language, word_joiner) for w in words]
+    expanded_words = []
+    i = 0
+
+    while i < len(words):
+        # For English, check for currency + scale patterns (e.g., "$3 billion")
+        if language == "en":
+            scale_result = _expand_currency_scale(words, i, language, word_joiner)
+            if scale_result:
+                num_expanded, scale_currency, skip_next = scale_result
+                expanded_words.append(num_expanded)
+                expanded_words.append(scale_currency)
+                i += 2
+                continue
+
+        # Normal single-word expansion
+        expanded_words.append(expand_number(words[i], language, word_joiner))
+        i += 1
+
     return " ".join(expanded_words)
 
 

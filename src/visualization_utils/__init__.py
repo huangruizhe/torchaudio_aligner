@@ -27,6 +27,10 @@ from .gentle import (
 )
 
 from .audio_preview import (
+    # New API (seconds-based)
+    preview_word_seconds,
+    preview_segment_seconds,
+    # Legacy API (frame-based)
     preview_word,
     preview_word_by_index,
     preview_segment,
@@ -41,7 +45,10 @@ __all__ = [
     # Gentle
     "get_gentle_visualization",
     "save_gentle_html",
-    # Audio preview
+    # Audio preview (new API)
+    "preview_word_seconds",
+    "preview_segment_seconds",
+    # Audio preview (legacy API)
     "preview_word",
     "preview_word_by_index",
     "preview_segment",

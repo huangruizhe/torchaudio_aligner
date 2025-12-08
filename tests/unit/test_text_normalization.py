@@ -163,6 +163,22 @@ class TestApostropheNormalization:
         assert len(orig_words) == len(norm_words)
 
 
+def _check_num2words_available():
+    """Check if num2words is available."""
+    try:
+        import num2words
+        return True
+    except ImportError:
+        return False
+
+
+NUM2WORDS_AVAILABLE = _check_num2words_available()
+requires_num2words = pytest.mark.skipif(
+    not NUM2WORDS_AVAILABLE,
+    reason="num2words not installed"
+)
+
+
 class TestNumberExpansion:
     """Tests for number/currency expansion (Test 3b, 3b+ from notebook)."""
 
@@ -179,6 +195,7 @@ class TestNumberExpansion:
         assert len(orig_words) == len(expanded_words), \
             f"Word count changed! {len(orig_words)} -> {len(expanded_words)}"
 
+    @requires_num2words
     def test_currency_dollar(self):
         """Test dollar currency expansion."""
         from text_frontend.normalization import expand_number
@@ -186,6 +203,7 @@ class TestNumberExpansion:
         result = expand_number("$66", word_joiner="")
         assert "sixtysixdollars" in result.lower()
 
+    @requires_num2words
     def test_currency_with_cents(self):
         """Test currency with cents."""
         from text_frontend.normalization import expand_number
@@ -194,6 +212,7 @@ class TestNumberExpansion:
         assert "dollars" in result.lower()
         assert "cents" in result.lower() or "fifty" in result.lower()
 
+    @requires_num2words
     def test_euro_currency(self):
         """Test euro currency."""
         from text_frontend.normalization import expand_number
@@ -201,6 +220,7 @@ class TestNumberExpansion:
         result = expand_number("€100", word_joiner="")
         assert "euro" in result.lower()
 
+    @requires_num2words
     def test_percentage(self):
         """Test percentage expansion."""
         from text_frontend.normalization import expand_number
@@ -208,6 +228,7 @@ class TestNumberExpansion:
         result = expand_number("50%", word_joiner="")
         assert "percent" in result.lower()
 
+    @requires_num2words
     def test_ordinal(self):
         """Test ordinal expansion."""
         from text_frontend.normalization import expand_number
@@ -224,6 +245,7 @@ class TestNumberExpansion:
             assert expected_pattern in result.lower(), \
                 f"'{input_num}' -> expected '{expected_pattern}' in '{result}'"
 
+    @requires_num2words
     def test_decimal(self):
         """Test decimal expansion."""
         from text_frontend.normalization import expand_number
@@ -231,6 +253,7 @@ class TestNumberExpansion:
         result = expand_number("3.14", word_joiner="")
         assert "point" in result.lower() or "three" in result.lower()
 
+    @requires_num2words
     def test_mixed_letter_number(self):
         """Test mixed letter-number like COVID19, B2B."""
         from text_frontend.normalization import expand_number
@@ -246,6 +269,7 @@ class TestNumberExpansion:
             assert expected_pattern in result.lower(), \
                 f"'{input_val}' -> expected '{expected_pattern}' in '{result}'"
 
+    @requires_num2words
     def test_comma_separated_numbers(self):
         """Test comma-separated numbers like 1,000,000."""
         from text_frontend.normalization import expand_number
@@ -269,6 +293,31 @@ class TestNumberExpansion:
         # Word count MUST be preserved
         assert len(orig_words) == len(norm_words), \
             f"Word count changed! {len(orig_words)} -> {len(norm_words)}"
+
+    @requires_num2words
+    def test_currency_scale_pattern(self):
+        """Test currency + scale word pattern: $3 billion -> three billiondollars."""
+        from text_frontend.normalization import expand_numbers_in_text
+
+        # Test basic pattern
+        result = expand_numbers_in_text("$3 billion", word_joiner="")
+        assert result == "three billiondollars", f"Got: {result}"
+
+        # Word count preserved
+        assert len("$3 billion".split()) == len(result.split()), \
+            f"Word count changed: 2 -> {len(result.split())}"
+
+        # Test with other currencies
+        result = expand_numbers_in_text("€5 million", word_joiner="")
+        assert "five" in result.lower()
+        assert "million" in result.lower()
+        assert "euro" in result.lower()
+
+        # Test decimal
+        result = expand_numbers_in_text("$2.5 billion", word_joiner="")
+        assert "two" in result.lower()
+        assert "billion" in result.lower()
+        assert "dollar" in result.lower()
 
 
 class TestCJKPreprocessing:

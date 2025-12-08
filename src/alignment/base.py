@@ -243,6 +243,19 @@ class AlignmentResult:
             return 0.0
         return self.words[-1].end_seconds() - self.words[0].start_seconds()
 
+    @property
+    def num_words(self) -> int:
+        """Number of aligned words."""
+        return len(self.words)
+
+    @property
+    def word_alignments(self) -> Dict[int, AlignedWord]:
+        """Get word alignments as dict keyed by word index.
+
+        Useful for detecting gaps in alignment (unaligned words).
+        """
+        return {w.index: w for w in self.words if w.index >= 0}
+
     # -------------------------------------------------------------------------
     # Query methods
     # -------------------------------------------------------------------------

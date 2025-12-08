@@ -11,6 +11,7 @@ Tests cover:
 """
 
 import pytest
+import os
 
 # Import markers from conftest
 from test_utils import TORCH_AVAILABLE
@@ -19,6 +20,27 @@ from test_utils import TORCH_AVAILABLE
 pytestmark = pytest.mark.skipif(
     not TORCH_AVAILABLE,
     reason="torch required for audio_frontend imports"
+)
+
+
+def _can_save_audio():
+    """Check if torchaudio can save audio files in this environment."""
+    try:
+        import torch
+        import torchaudio
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+            waveform = torch.randn(1, 1000)
+            torchaudio.save(f.name, waveform, 16000)
+        return True
+    except Exception:
+        return False
+
+
+CAN_SAVE_AUDIO = _can_save_audio()
+requires_audio_save = pytest.mark.skipif(
+    not CAN_SAVE_AUDIO,
+    reason="torchaudio.save() not working (may need torchcodec or soundfile backend)"
 )
 
 
@@ -51,6 +73,7 @@ class TestLoadAudio:
         with pytest.raises(FileNotFoundError):
             load_audio(fake_path)
 
+    @requires_audio_save
     def test_load_returns_tuple(self, tmp_path):
         """Test that load_audio returns (waveform, sample_rate) tuple."""
         import torch
@@ -67,6 +90,7 @@ class TestLoadAudio:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
+    @requires_audio_save
     def test_load_waveform_shape(self, tmp_path):
         """Test that loaded waveform has shape (channels, samples)."""
         import torch
@@ -83,6 +107,7 @@ class TestLoadAudio:
         assert loaded_waveform.dim() == 2
         assert loaded_waveform.shape[0] >= 1  # At least 1 channel
 
+    @requires_audio_save
     def test_load_sample_rate_positive(self, tmp_path):
         """Test that sample rate is positive."""
         import torch
@@ -97,6 +122,7 @@ class TestLoadAudio:
         _, sample_rate = load_audio(test_audio)
         assert sample_rate > 0
 
+    @requires_audio_save
     def test_load_preserves_sample_rate(self, tmp_path):
         """Test that load preserves original sample rate."""
         import torch
@@ -112,6 +138,7 @@ class TestLoadAudio:
         _, sample_rate = load_audio(test_audio)
         assert sample_rate == original_sr
 
+    @requires_audio_save
     def test_load_with_path_object(self, tmp_path):
         """Test load_audio accepts Path objects."""
         import torch
@@ -128,6 +155,7 @@ class TestLoadAudio:
         loaded_waveform, _ = load_audio(Path(test_audio))
         assert loaded_waveform is not None
 
+    @requires_audio_save
     def test_load_with_string_path(self, tmp_path):
         """Test load_audio accepts string paths."""
         import torch
@@ -143,6 +171,7 @@ class TestLoadAudio:
         loaded_waveform, _ = load_audio(str(test_audio))
         assert loaded_waveform is not None
 
+    @requires_audio_save
     def test_load_stereo_audio(self, tmp_path):
         """Test loading stereo audio."""
         import torch
@@ -157,6 +186,7 @@ class TestLoadAudio:
         loaded_waveform, _ = load_audio(test_audio)
         assert loaded_waveform.shape[0] == 2
 
+    @requires_audio_save
     def test_load_backend_torchaudio(self, tmp_path):
         """Test explicit torchaudio backend."""
         import torch
@@ -171,6 +201,7 @@ class TestLoadAudio:
         loaded_waveform, _ = load_audio(test_audio, backend="torchaudio")
         assert loaded_waveform is not None
 
+    @requires_audio_save
     def test_load_backend_auto(self, tmp_path):
         """Test auto backend selection."""
         import torch
@@ -189,6 +220,7 @@ class TestLoadAudio:
 class TestLoadWithSoundfile:
     """Tests for soundfile backend (if available)."""
 
+    @requires_audio_save
     def test_soundfile_backend_if_available(self, tmp_path):
         """Test soundfile backend if installed."""
         import torch
