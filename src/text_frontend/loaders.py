@@ -216,6 +216,34 @@ def load_text_from_pdf_ocr(
     return text
 
 
+def load_text(source: Union[str, Path]) -> str:
+    """
+    Load text from any source (auto-detect type).
+
+    Convenience function that automatically detects the source type:
+    - URLs (http/https): Uses load_text_from_url
+    - PDF files (.pdf): Uses load_text_from_pdf
+    - Other files: Uses load_text_from_file
+
+    Args:
+        source: File path or URL
+
+    Returns:
+        Extracted text content
+
+    Example:
+        >>> text = load_text("transcript.pdf")
+        >>> text = load_text("https://example.com/page.html")
+        >>> text = load_text("transcript.txt")
+    """
+    s = str(source)
+    if s.startswith("http://") or s.startswith("https://"):
+        return load_text_from_url(s)
+    if s.lower().endswith(".pdf"):
+        return load_text_from_pdf(source)
+    return load_text_from_file(source)
+
+
 def get_available_loaders() -> dict:
     """Return availability of text loading backends."""
     return {

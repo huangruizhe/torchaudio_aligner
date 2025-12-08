@@ -35,6 +35,7 @@ Main functionality:
 
 # Text loading
 from .loaders import (
+    load_text,
     load_text_from_file,
     load_text_from_url,
     load_text_from_pdf,
@@ -83,6 +84,7 @@ from .frontend import (
 
 __all__ = [
     # Loaders
+    "load_text",
     "load_text_from_file",
     "load_text_from_url",
     "load_text_from_pdf",
