@@ -175,8 +175,25 @@ def align_long_audio(
     if verbose:
         logger.info("Step 2: Loading text...")
 
-    from text_frontend import load_text_from_pdf, normalize_for_mms, romanize_text_aligned
+    from text_frontend import load_text_from_pdf, load_text_from_pdf_ocr, normalize_for_mms, romanize_text_aligned
     from text_frontend.romanization import preprocess_cjk
+
+    # Map language codes to EasyOCR language codes for OCR fallback
+    LANG_TO_OCR = {
+        "hin": ["hi", "en"],  # Hindi
+        "ara": ["ar", "en"],  # Arabic
+        "tha": ["th", "en"],  # Thai
+        "jpn": ["ja", "en"], "ja": ["ja", "en"],  # Japanese
+        "kor": ["ko", "en"], "ko": ["ko", "en"],  # Korean
+        "cmn": ["ch_sim", "en"], "zh": ["ch_sim", "en"],  # Chinese Simplified
+        "yue": ["ch_tra", "en"],  # Chinese Traditional (Cantonese)
+        "rus": ["ru", "en"],  # Russian
+        "ben": ["bn", "en"],  # Bengali
+        "tam": ["ta", "en"],  # Tamil
+        "tel": ["te", "en"],  # Telugu
+        "kan": ["kn", "en"],  # Kannada
+        "mal": ["ml", "en"],  # Malayalam
+    }
 
     if isinstance(text, Path):
         text = str(text)
@@ -184,6 +201,17 @@ def align_long_audio(
     if isinstance(text, str):
         if text.endswith('.pdf'):
             text_content = load_text_from_pdf(text)
+            # Check if PDF extraction returned meaningful text
+            if len(text_content.strip()) < 100 or len(text_content.split()) < 20:
+                # Try OCR fallback
+                ocr_langs = LANG_TO_OCR.get(language, ["en"])
+                if verbose:
+                    logger.info(f"  PDF text extraction returned minimal content, trying OCR with languages: {ocr_langs}")
+                try:
+                    text_content = load_text_from_pdf_ocr(text, languages=ocr_langs, fallback_to_text=False)
+                except ImportError as e:
+                    logger.warning(f"  OCR not available: {e}")
+                    logger.warning(f"  Install with: pip install easyocr pdf2image && apt install poppler-utils")
             if verbose:
                 logger.info(f"  PDF: {text}")
         elif text.endswith('.txt'):
