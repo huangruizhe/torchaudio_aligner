@@ -336,3 +336,78 @@ def preview_random_segment(
     )
 
     return audio, words, start_idx
+
+
+def preview_word_by_index(
+    waveform,
+    word_alignment: Dict[int, Any],
+    alignment_idx: int,
+    sample_rate: int = 16000,
+    frame_duration: float = 0.02,
+    padding_frames: int = 2,
+):
+    """
+    Preview audio for the Nth word in the alignment (by position, not word index).
+
+    Args:
+        waveform: Audio waveform tensor
+        word_alignment: Dict mapping word index to AlignedWord
+        alignment_idx: Position in the sorted alignment (0, 1, 2, ...)
+        sample_rate: Audio sample rate
+        frame_duration: Duration of each frame in seconds
+        padding_frames: Extra frames to include
+
+    Returns:
+        IPython.display.Audio object
+    """
+    sorted_indices = sorted(word_alignment.keys())
+    if alignment_idx < 0 or alignment_idx >= len(sorted_indices):
+        print(f"Alignment index {alignment_idx} out of range [0, {len(sorted_indices)})")
+        return None
+
+    word_idx = sorted_indices[alignment_idx]
+    return preview_word(
+        waveform, word_alignment, word_idx,
+        sample_rate, frame_duration, padding_frames
+    )
+
+
+def preview_all_words(
+    waveform,
+    word_alignment: Dict[int, Any],
+    sample_rate: int = 16000,
+    frame_duration: float = 0.02,
+    padding_frames: int = 2,
+    max_words: int = 50,
+):
+    """
+    Preview all aligned words (up to max_words).
+
+    Displays each word with its audio player.
+
+    Args:
+        waveform: Audio waveform tensor
+        word_alignment: Dict mapping word index to AlignedWord
+        sample_rate: Audio sample rate
+        frame_duration: Duration of each frame
+        padding_frames: Extra frames to include
+        max_words: Maximum words to display
+
+    Example:
+        >>> preview_all_words(waveform, result.word_alignments)
+    """
+    from IPython.display import display, HTML
+
+    sorted_items = sorted(word_alignment.items())[:max_words]
+
+    print(f"Previewing {len(sorted_items)} words:")
+    print("=" * 60)
+
+    for i, (word_idx, word) in enumerate(sorted_items):
+        audio = preview_word(
+            waveform, word_alignment, word_idx,
+            sample_rate, frame_duration, padding_frames
+        )
+        if audio:
+            display(audio)
+        print("-" * 40)
