@@ -675,6 +675,69 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             lines.append(f"  Audio duration: {self.metadata['audio_duration']:.1f}s")
         return "\n".join(lines)
 
+    # -------------------------------------------------------------------------
+    # Interactive Demo
+    # -------------------------------------------------------------------------
+
+    def create_interactive_demo(self, output_dir: str, title: str = None) -> str:
+        """
+        Create an interactive HTML demo with clickable word audio clips.
+
+        This creates a self-contained demo directory with:
+        - index.html: Interactive visualization with segment selector
+        - audio_clips/: Pre-extracted WAV files for each aligned word
+
+        Features:
+        - Segment selector: Choose start/end index or click "Random 50 Words"
+        - Click on any word to play its audio clip (works offline)
+        - Modern UI with statistics
+
+        Args:
+            output_dir: Directory to save demo files
+            title: Optional title for the demo page
+
+        Returns:
+            Path to the index.html file
+
+        Example:
+            >>> result = align_long_audio("audio.mp3", "text.txt", language="eng")
+            >>> result.create_interactive_demo("demo_output/")
+            >>> # Open demo_output/index.html in browser
+
+        Raises:
+            ValueError: If audio_file not in metadata (need to use align_long_audio)
+        """
+        # Check required metadata
+        audio_file = self.metadata.get("audio_file")
+        if not audio_file:
+            raise ValueError(
+                "audio_file not found in metadata. "
+                "Use align_long_audio() to get results with this method enabled."
+            )
+
+        # Build title if not provided
+        if title is None:
+            title = "TorchAudio Aligner - Interactive Demo"
+            if "language" in self.metadata:
+                title = f"{title} ({self.metadata['language']})"
+
+        # Use original_text if available, otherwise reconstruct from words
+        text = self.metadata.get("original_text", " ".join(w.word for w in self.words))
+
+        # Build word_alignment dict from words list
+        word_alignment = {w.index: w for w in self.words}
+
+        # Import and call the actual implementation
+        from visualization_utils.gentle import create_interactive_demo as _create_demo
+        return _create_demo(
+            word_alignment=word_alignment,
+            text=text,
+            audio_file=audio_file,
+            output_dir=output_dir,
+            frame_duration=DEFAULT_FRAME_DURATION,
+            title=title,
+        )
+
     def __repr__(self):
         return f"AlignmentResult({len(self.words)} words)"
 
