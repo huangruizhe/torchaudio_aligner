@@ -10,15 +10,28 @@ Token format for alignment:
 - Input: "this is a sentence"
 - Output: [[75], [47], [7], [629, 218]]
   (list of lists, each inner list = tokens for one word)
+
+Each tokenizer handles its own vocabulary-specific normalization:
+- Knows what characters it supports
+- Normalizes unsupported chars (smart quotes, accents, etc.) appropriately
+- Uses unidecode for robust ASCII transliteration when needed
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, List, Union, Dict
+from typing import Optional, List, Union, Dict, Set
 import re
 import logging
 
 from .normalization import normalize_for_mms
+
+# Optional dependency for robust Unicode normalization
+try:
+    from unidecode import unidecode as _unidecode
+    _UNIDECODE_AVAILABLE = True
+except ImportError:
+    _unidecode = None
+    _UNIDECODE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +47,7 @@ class TokenizerInterface(ABC):
     Tokenizers must implement:
     - encode(): Convert text to token IDs (word-level grouping)
     - text_normalize(): Normalize text before tokenization
+    - get_supported_chars(): Return set of characters this tokenizer supports
 
     Token format:
     - Input: "this is a sentence"
@@ -55,6 +69,43 @@ class TokenizerInterface(ABC):
     id2token: Dict[int, str]
     blk_id: int
     unk_id: int
+
+    def get_supported_chars(self) -> Set[str]:
+        """
+        Return set of characters this tokenizer supports.
+
+        Default implementation returns all single-char tokens from vocabulary.
+        Subclasses can override for more specific behavior.
+        """
+        return {k for k in self.token2id.keys() if len(k) == 1}
+
+    def normalize_for_vocab(self, word: str, unk_token: str = "*") -> str:
+        """
+        Normalize a word to fit this tokenizer's vocabulary.
+
+        Uses unidecode for robust Unicode->ASCII transliteration when available.
+        This handles smart quotes, accented characters, etc.
+
+        Args:
+            word: Input word
+            unk_token: Token to return if word becomes empty
+
+        Returns:
+            Normalized word containing only supported characters
+        """
+        supported = self.get_supported_chars()
+
+        # Step 1: Try ASCII transliteration if unidecode available
+        if _UNIDECODE_AVAILABLE:
+            word = _unidecode(word)
+
+        # Step 2: Lowercase and filter to supported chars
+        result = []
+        for char in word.lower():
+            if char in supported:
+                result.append(char)
+
+        return ''.join(result) if result else unk_token
 
     @abstractmethod
     def encode(self, sentence: str, out_type=int) -> List[List[int]]:
@@ -109,6 +160,11 @@ class CharTokenizer(TokenizerInterface):
     Converts text to a list of token lists (one per word).
     Used with character-based CTC models like MMS_FA and Wav2Vec2.
 
+    Supports robust Unicode normalization via unidecode:
+    - Smart quotes (') → straight apostrophe (')
+    - Accented chars (café) → ASCII (cafe)
+    - Em-dashes (—) → hyphens (-) or removed
+
     Example:
         >>> labels = ('-', 'a', 'i', 'e', ..., '*')
         >>> tokenizer = CharTokenizer(
@@ -118,9 +174,11 @@ class CharTokenizer(TokenizerInterface):
         ... )
         >>> tokenizer.encode("hello")
         [[7, 4, 11, 11, 14]]  # h, e, l, l, o
+        >>> tokenizer.normalize_for_vocab("Meta's café")  # Smart quote + accent
+        "meta's cafe"
     """
 
-    # Punctuation to remove during normalization
+    # Punctuation to remove during normalization (fallback if unidecode unavailable)
     punctuation = '!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~'
 
     def __init__(
@@ -144,6 +202,9 @@ class CharTokenizer(TokenizerInterface):
         self.blk_id = token2id.get(blank_token, 0)
         self.unk_id = token2id.get(unk_token)
 
+        # Cache supported characters for efficient lookup
+        self._supported_chars = self.get_supported_chars()
+
         # Verify blank is at position 0 (k2 requirement)
         if self.blk_id != 0:
             logger.warning(
@@ -151,13 +212,47 @@ class CharTokenizer(TokenizerInterface):
                 "This may cause issues with k2 alignment."
             )
 
-    def _normalize_word(self, word: str) -> str:
-        """Normalize a single word (remove punctuation, lowercase)."""
-        word = word.translate(str.maketrans("", "", self.punctuation))
+    def get_supported_chars(self) -> Set[str]:
+        """Return set of characters this tokenizer supports."""
+        return {k for k in self.token2id.keys() if len(k) == 1}
+
+    def normalize_for_vocab(self, word: str, unk_token: str = None) -> str:
+        """
+        Normalize a word to fit this tokenizer's vocabulary.
+
+        Uses unidecode for robust Unicode handling:
+        - Smart quotes → straight apostrophe
+        - Accented chars → ASCII equivalents
+        - Other Unicode → best ASCII approximation
+
+        Args:
+            word: Input word (may contain Unicode)
+            unk_token: Token for empty result (default: self.unk_token)
+
+        Returns:
+            Normalized word with only supported characters
+        """
+        if unk_token is None:
+            unk_token = self.unk_token
+
+        # Step 1: ASCII transliteration (handles smart quotes, accents, etc.)
+        if _UNIDECODE_AVAILABLE:
+            word = _unidecode(word)
+        else:
+            # Fallback: manual punctuation removal
+            word = word.translate(str.maketrans("", "", self.punctuation))
+
+        # Step 2: Lowercase
         word = word.lower()
-        if len(word) == 0:
-            return self.unk_token
-        return word
+
+        # Step 3: Keep only supported characters
+        result = ''.join(c for c in word if c in self._supported_chars)
+
+        return result if result else unk_token
+
+    def _normalize_word(self, word: str) -> str:
+        """Normalize a single word. Uses normalize_for_vocab internally."""
+        return self.normalize_for_vocab(word)
 
     def text_normalize(self, text: str) -> str:
         """
@@ -165,7 +260,7 @@ class CharTokenizer(TokenizerInterface):
 
         Words that become empty after normalization are replaced with unk_token.
         """
-        words = [self._normalize_word(w) for w in text.split()]
+        words = [self.normalize_for_vocab(w) for w in text.split()]
         return " ".join(words)
 
     def normalize(self, text: str) -> str:

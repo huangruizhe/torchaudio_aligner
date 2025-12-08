@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _NUM2WORDS_AVAILABLE = False
 _WETEXT_AVAILABLE = False
 _WHISPER_NORMALIZER_AVAILABLE = False
+_UNIDECODE_AVAILABLE = False
 
 try:
     import num2words as _num2words_module
@@ -37,6 +38,12 @@ try:
     _WETEXT_AVAILABLE = True
 except ImportError:
     _WeTextNormalizer = None
+
+try:
+    from unidecode import unidecode as _unidecode
+    _UNIDECODE_AVAILABLE = True
+except ImportError:
+    _unidecode = None
 
 # Placeholder for whisper_normalizer
 _WhisperNormalizer = None
@@ -300,23 +307,39 @@ def normalize_text_basic(text: str) -> str:
 
 # MMS-style normalization
 _MMS_PUNCTUATION = '!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~'
+_MMS_VALID_CHARS = set("abcdefghijklmnopqrstuvwxyz'")
 
 
 def _normalize_word_for_mms(word: str, unk_token: str = "*") -> str:
-    """Normalize a single word for MMS model."""
+    """
+    Normalize a single word for MMS model.
+
+    Uses unidecode for robust Unicode handling when available:
+    - Smart quotes (') → straight apostrophe (')
+    - Accented chars (café) → ASCII (cafe)
+    - Em-dashes, special punctuation → removed or simplified
+
+    Falls back to manual normalization if unidecode unavailable.
+    """
+    # Step 1: ASCII transliteration (handles all Unicode edge cases)
+    if _UNIDECODE_AVAILABLE:
+        word = _unidecode(word)
+    else:
+        # Fallback: manual apostrophe normalization
+        word = word.replace("'", "'")  # Right single quotation mark
+        word = word.replace("'", "'")  # Left single quotation mark
+        word = word.replace("`", "'")  # Backtick
+        word = word.replace("´", "'")  # Acute accent
+
+    # Step 2: Remove punctuation and lowercase
     word = word.translate(str.maketrans("", "", _MMS_PUNCTUATION))
     word = word.lower()
-    # Normalize all apostrophe variants to straight apostrophe
-    word = word.replace("'", "'")  # Right single quotation mark
-    word = word.replace("'", "'")  # Left single quotation mark
-    word = word.replace("`", "'")  # Backtick
-    word = word.replace("´", "'")  # Acute accent
     word = word.replace("-", "")
-    if len(word) == 0:
-        return unk_token
-    if not all(c in "abcdefghijklmnopqrstuvwxyz'" for c in word):
-        return unk_token
-    return word
+
+    # Step 3: Filter to valid MMS characters
+    result = ''.join(c for c in word if c in _MMS_VALID_CHARS)
+
+    return result if result else unk_token
 
 
 def normalize_for_mms(
@@ -360,4 +383,5 @@ def get_available_normalizers() -> dict:
         "num2words": _NUM2WORDS_AVAILABLE,
         "wetext": _WETEXT_AVAILABLE,
         "whisper_normalizer": _WHISPER_NORMALIZER_AVAILABLE,
+        "unidecode": _UNIDECODE_AVAILABLE,
     }
