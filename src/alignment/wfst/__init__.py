@@ -24,6 +24,12 @@ from .factor_transducer import (
 from .k2_utils import (
     get_best_paths,
     get_texts_with_timestamp,
+    # Tutorial.py-style functions
+    align_segments,
+    concat_alignments,
+    get_final_word_alignment,
+    AlignedToken,
+    AlignedWord,
 )
 from .lis_utils import (
     compute_lis,
@@ -43,6 +49,12 @@ __all__ = [
     # k2 utilities
     "get_best_paths",
     "get_texts_with_timestamp",
+    # Tutorial.py-style functions
+    "align_segments",
+    "concat_alignments",
+    "get_final_word_alignment",
+    "AlignedToken",
+    "AlignedWord",
     # LIS utilities
     "compute_lis",
     "remove_outliers",

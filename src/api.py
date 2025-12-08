@@ -8,6 +8,12 @@ This module provides a unified interface that combines:
 - Alignment (WFST-based flexible alignment)
 - Stitching utils (LIS-based segment concatenation)
 
+The implementation follows the pattern from Tutorial.py, using:
+- align_segments() for segment-wise alignment
+- concat_alignments() for LIS-based stitching
+- get_final_word_alignment() for word-level results
+- second_pass_fa() for refinement (optional)
+
 Usage:
     from torchaudio_aligner import align_long_audio
 
@@ -29,6 +35,10 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
+
+# Configure logging format
+logfmt = "%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=logfmt)
 
 
 @dataclass
@@ -83,6 +93,76 @@ class LongFormAlignmentResult:
             else:
                 end = start + 0.5  # Default duration for last word
             lines.append(f"{start:.6f}\t{end:.6f}\t{word.word}")
+        return "\n".join(lines)
+
+    def save_audacity_labels(self, output_path: Union[str, Path], frame_duration: float = 0.02) -> str:
+        """Save alignment as Audacity label file."""
+        output_path = Path(output_path)
+        labels = self.to_audacity_labels(frame_duration)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(labels)
+        return str(output_path)
+
+    def to_gentle_html(
+        self,
+        audio_file: Optional[Union[str, Path]] = None,
+        frame_duration: float = 0.02,
+        title: str = "TorchAudio Aligner - Alignment Visualization",
+    ) -> str:
+        """Generate Gentle-style HTML visualization."""
+        from visualization_utils.gentle import get_gentle_visualization
+
+        text = " ".join(self.text_words) if self.text_words else ""
+        return get_gentle_visualization(
+            self.word_alignments,
+            text,
+            audio_file=audio_file,
+            frame_duration=frame_duration,
+            title=title,
+        )
+
+    def save_gentle_html(
+        self,
+        output_path: Union[str, Path],
+        audio_file: Optional[Union[str, Path]] = None,
+        frame_duration: float = 0.02,
+        title: str = "TorchAudio Aligner - Alignment Visualization",
+    ) -> str:
+        """Save Gentle-style HTML visualization to file."""
+        output_path = Path(output_path)
+        html = self.to_gentle_html(audio_file, frame_duration, title)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        return str(output_path)
+
+    @property
+    def frame_duration(self) -> float:
+        """Get frame duration from metadata, default 0.02 (20ms)."""
+        if self.metadata and "frame_duration" in self.metadata:
+            return self.metadata["frame_duration"]
+        return 0.02
+
+    def coverage_percent(self) -> float:
+        """Get percentage of words aligned."""
+        if not self.text_words:
+            return 0.0
+        return 100.0 * len(self.word_alignments) / len(self.text_words)
+
+    def summary(self) -> str:
+        """Get a summary string of the alignment result."""
+        lines = [
+            f"Alignment Summary:",
+            f"  Aligned words: {self.num_aligned_words}",
+            f"  Unaligned regions: {self.num_unaligned_regions}",
+        ]
+        if self.text_words:
+            lines.append(f"  Total words: {len(self.text_words)}")
+            lines.append(f"  Coverage: {self.coverage_percent():.1f}%")
+        if self.metadata:
+            if "audio_duration" in self.metadata:
+                lines.append(f"  Audio duration: {self.metadata['audio_duration']:.1f}s")
+            if "num_segments" in self.metadata:
+                lines.append(f"  Segments: {self.metadata['num_segments']}")
         return "\n".join(lines)
 
 
@@ -281,12 +361,12 @@ def align_long_audio(
         logger.info(f"  Nodes: {decoding_graph.shape[0]}, Arcs: {decoding_graph.num_arcs}")
 
     # =========================================================================
-    # Step 5: Align segments
+    # Step 5: Align segments (following Tutorial.py pattern)
     # =========================================================================
     if verbose:
         logger.info("Step 5: Aligning segments...")
 
-    from alignment.wfst.k2_utils import get_best_paths, get_texts_with_timestamp
+    from alignment.wfst.k2_utils import align_segments
     from tqdm import tqdm
 
     waveforms_batched, lengths = segmentation.get_waveforms_batched()
@@ -317,102 +397,59 @@ def align_long_audio(
             )
             emissions = torch.cat((emissions, star_dim), dim=-1)
 
-        # Get best paths
-        lattice = get_best_paths(emissions, decoding_graph, emission_lengths)
-        batch_results = get_texts_with_timestamp(lattice)
+        # Align segments using the tested API (matches Tutorial.py)
+        batch_results = align_segments(
+            emissions,
+            decoding_graph,
+            emission_lengths,
+        )
 
-        # Add frame offsets and word indices
-        for tokens, offset in zip(batch_results, batch_offsets):
-            for token in tokens:
+        # Add frame offsets and word indices to tokens
+        for aligned_tokens, offset in zip(batch_results, batch_offsets):
+            for token in aligned_tokens:
                 token.timestamp += offset.item()
+                if token.token_id == tokenizer.blank_id:
+                    continue
                 if token.token_id in word_index_sym_tab:
                     token.attr["wid"] = word_index_sym_tab[token.token_id]
                 if token.token_id in token_sym_tab:
                     token.attr["tk"] = token_sym_tab[token.token_id]
-            alignment_results.append(tokens)
+            alignment_results.append(aligned_tokens)
 
     if verbose:
         logger.info(f"  Aligned {len(alignment_results)} segments")
 
     # =========================================================================
-    # Step 6: Stitch segments using LIS
+    # Step 6: Concatenate alignments using LIS (following Tutorial.py pattern)
     # =========================================================================
     if verbose:
-        logger.info("Step 6: Stitching segments with LIS...")
+        logger.info("Step 6: Concatenating alignments with LIS...")
 
-    from stitching_utils.lis import (
-        compute_lis,
-        remove_outliers,
-        remove_isolated_words,
-        find_unaligned_regions,
+    from alignment.wfst.k2_utils import concat_alignments
+
+    # Use concat_alignments which does LIS, outlier removal, and isolated word removal
+    resolved_alignment_results, unaligned_indices = concat_alignments(
+        alignment_results,
+        neighborhood_size=5,
     )
 
-    # Flatten all tokens
-    all_tokens = []
-    for tokens in alignment_results:
-        all_tokens.extend(tokens)
-
-    # Extract word indices
-    word_indices = [t.attr.get("wid", -1) for t in all_tokens]
-
-    # Compute LIS
-    lis_indices = compute_lis(word_indices)
-
-    # Remove outliers
-    lis_indices = remove_outliers(word_indices, lis_indices, neighborhood_size=5)
-
-    # Remove isolated words
-    lis_indices = remove_isolated_words(word_indices, lis_indices, min_neighbors=2)
-
-    # Get resolved tokens
-    resolved_tokens = [all_tokens[i] for i in lis_indices]
-
-    # Find unaligned regions
-    aligned_word_indices = [t.attr["wid"] for t in resolved_tokens if "wid" in t.attr]
-    unaligned_indices = find_unaligned_regions(aligned_word_indices, len(text_words))
-
     if verbose:
-        logger.info(f"  Aligned tokens: {len(resolved_tokens)}")
-        logger.info(f"  Unaligned regions: {len(unaligned_indices)}")
+        logger.info(f"  Aligned tokens: {len(resolved_alignment_results)}")
+        logger.info(f"  Unaligned regions: {len(unaligned_indices) if unaligned_indices else 0}")
 
     # =========================================================================
-    # Step 7: Build word-level alignment
+    # Step 7: Build word-level alignment (following Tutorial.py pattern)
     # =========================================================================
     if verbose:
         logger.info("Step 7: Building word-level alignment...")
 
-    from alignment.base import AlignedWord
+    from alignment.wfst.k2_utils import get_final_word_alignment
 
-    word_alignments = {}
-
-    for token in resolved_tokens:
-        if "wid" not in token.attr:
-            continue
-
-        word_idx = token.attr["wid"]
-        if word_idx < 0 or word_idx >= len(text_words):
-            continue
-
-        if word_idx not in word_alignments:
-            word_alignments[word_idx] = AlignedWord(
-                word=text_words[word_idx],
-                start_time=token.timestamp,
-                end_time=None,
-            )
-        else:
-            # Update end time to include this token
-            pass
-
-    # Compute end times
-    sorted_indices = sorted(word_alignments.keys())
-    for i, idx in enumerate(sorted_indices[:-1]):
-        next_idx = sorted_indices[i + 1]
-        word_alignments[idx].end_time = word_alignments[next_idx].start_time
-
-    # Last word gets a default duration
-    if sorted_indices:
-        last_idx = sorted_indices[-1]
-        word_alignments[last_idx].end_time = word_alignments[last_idx].start_time + 25  # ~0.5s
+    word_alignments = get_final_word_alignment(
+        resolved_alignment_results,
+        text_normalized,
+        tokenizer,
+    )
 
     if verbose:
         logger.info(f"  Aligned words: {len(word_alignments)}")
@@ -442,8 +479,8 @@ def align_long_audio(
 
     result = LongFormAlignmentResult(
         word_alignments=word_alignments,
-        unaligned_indices=unaligned_indices,
-        token_alignments=resolved_tokens,
+        unaligned_indices=unaligned_indices if unaligned_indices else [],
+        token_alignments=resolved_alignment_results,
         text_words=text_words,
         metadata=metadata,
     )
@@ -473,3 +510,173 @@ def second_pass_refinement(
     # TODO: Implement second-pass forced alignment for unaligned regions
     logger.warning("second_pass_refinement is not yet implemented")
     return result
+
+
+# =============================================================================
+# Fluent/Builder API: Aligner class
+# =============================================================================
+
+class Aligner:
+    """
+    Fluent API for long-form audio alignment.
+
+    This provides a stateful interface for alignment, allowing you to
+    configure the aligner once and run multiple alignments.
+
+    Example:
+        >>> aligner = Aligner(language="eng")
+        >>> result = aligner.align(audio="file.mp3", text="transcript.pdf")
+        >>> print(result.summary())
+
+        # Or step by step:
+        >>> aligner = Aligner(language="eng")
+        >>> aligner.load_audio("file.mp3")
+        >>> aligner.load_text("transcript.pdf")
+        >>> result = aligner.run()
+
+        # Reuse for another file:
+        >>> aligner.load_audio("another.mp3")
+        >>> result2 = aligner.run()
+    """
+
+    def __init__(
+        self,
+        language: str = "eng",
+        model: Optional[str] = "mms-fa",
+        device: Optional[str] = None,
+        segment_size: float = 15.0,
+        overlap: float = 2.0,
+        batch_size: int = 8,
+        verbose: bool = False,
+    ):
+        """
+        Initialize the Aligner.
+
+        Args:
+            language: Language code (e.g., "eng", "deu", "fra")
+            model: Model name ("mms-fa" or path to custom model)
+            device: Device to use ("cuda", "cpu", or None for auto)
+            segment_size: Segment size in seconds
+            overlap: Overlap between segments in seconds
+            batch_size: Batch size for inference
+            verbose: Whether to print progress
+        """
+        self.language = language
+        self.model_name = model
+        self.device = device
+        self.segment_size = segment_size
+        self.overlap = overlap
+        self.batch_size = batch_size
+        self.verbose = verbose
+
+        # State
+        self._model = None
+        self._audio_path = None
+        self._text_path = None
+        self._waveform = None
+        self._text = None
+
+    def load_audio(self, audio: Union[str, Path, torch.Tensor]) -> "Aligner":
+        """
+        Load audio file or waveform.
+
+        Args:
+            audio: Path to audio file or waveform tensor
+
+        Returns:
+            self (for chaining)
+        """
+        if isinstance(audio, (str, Path)):
+            self._audio_path = str(audio)
+            self._waveform = None  # Will be loaded lazily
+        else:
+            self._waveform = audio
+            self._audio_path = None
+        return self
+
+    def load_text(self, text: Union[str, Path]) -> "Aligner":
+        """
+        Load text from file or string.
+
+        Args:
+            text: Path to text/PDF file or text string
+
+        Returns:
+            self (for chaining)
+        """
+        if isinstance(text, Path):
+            self._text_path = str(text)
+            self._text = None
+        elif isinstance(text, str) and (text.endswith('.pdf') or text.endswith('.txt') or '/' in text):
+            # Looks like a file path
+            self._text_path = text
+            self._text = None
+        else:
+            # Raw text
+            self._text = text
+            self._text_path = None
+        return self
+
+    def align(
+        self,
+        audio: Optional[Union[str, Path, torch.Tensor]] = None,
+        text: Optional[Union[str, Path]] = None,
+    ) -> LongFormAlignmentResult:
+        """
+        Run alignment on audio and text.
+
+        Args:
+            audio: Audio file/tensor (optional if already loaded)
+            text: Text file/string (optional if already loaded)
+
+        Returns:
+            LongFormAlignmentResult
+        """
+        if audio is not None:
+            self.load_audio(audio)
+        if text is not None:
+            self.load_text(text)
+
+        return self.run()
+
+    def run(self) -> LongFormAlignmentResult:
+        """
+        Run alignment with currently loaded audio and text.
+
+        Returns:
+            LongFormAlignmentResult
+        """
+        # Determine audio source
+        if self._audio_path:
+            audio_source = self._audio_path
+        elif self._waveform is not None:
+            audio_source = self._waveform
+        else:
+            raise ValueError("No audio loaded. Call load_audio() first or pass audio to align().")
+
+        # Determine text source
+        if self._text_path:
+            text_source = self._text_path
+        elif self._text:
+            text_source = self._text
+        else:
+            raise ValueError("No text loaded. Call load_text() first or pass text to align().")
+
+        # Use the functional API
+        return align_long_audio(
+            audio=audio_source,
+            text=text_source,
+            language=self.language,
+            model=self._model,
+            device=self.device,
+            segment_size=self.segment_size,
+            overlap=self.overlap,
+            batch_size=self.batch_size,
+            verbose=self.verbose,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"Aligner(language='{self.language}', model='{self.model_name}', "
+            f"segment_size={self.segment_size}, overlap={self.overlap})"
+        )

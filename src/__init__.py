@@ -3,7 +3,7 @@ TorchAudio Long-Form Aligner
 
 A modular library for forced alignment of long-form speech with text.
 
-Usage:
+Usage (functional API):
     from torchaudio_aligner import align_long_audio
 
     result = align_long_audio(
@@ -11,6 +11,13 @@ Usage:
         text="path/to/transcript.pdf",
         language="eng",
     )
+
+Usage (fluent API):
+    from torchaudio_aligner import Aligner
+
+    aligner = Aligner(language="eng")
+    result = aligner.align(audio="file.mp3", text="transcript.pdf")
+    print(result.summary())
 
 Modules:
 - text_frontend: Text loading, normalization, romanization, tokenization
@@ -33,6 +40,7 @@ from .api import (
     align_long_audio,
     LongFormAlignmentResult,
     second_pass_refinement,
+    Aligner,
 )
 
 __all__ = [
@@ -43,10 +51,12 @@ __all__ = [
     "alignment",
     "stitching_utils",
     "visualization_utils",
-    # High-level API
+    # High-level API (functional)
     "align_long_audio",
     "LongFormAlignmentResult",
     "second_pass_refinement",
+    # High-level API (fluent)
+    "Aligner",
 ]
 
 # Version
