@@ -38,17 +38,33 @@ try:
 except ImportError:
     PdfReader = None
 
-try:
-    import easyocr
-    _OCR_AVAILABLE = True
-except ImportError:
-    easyocr = None
+# Lazy imports for OCR - these can conflict with CUDA if imported early
+_OCR_AVAILABLE = None  # Will be checked lazily
+_PDF2IMAGE_AVAILABLE = None  # Will be checked lazily
 
-try:
-    from pdf2image import convert_from_path
-    _PDF2IMAGE_AVAILABLE = True
-except ImportError:
-    convert_from_path = None
+
+def _check_ocr_available():
+    """Lazily check if OCR dependencies are available."""
+    global _OCR_AVAILABLE
+    if _OCR_AVAILABLE is None:
+        try:
+            import easyocr
+            _OCR_AVAILABLE = True
+        except ImportError:
+            _OCR_AVAILABLE = False
+    return _OCR_AVAILABLE
+
+
+def _check_pdf2image_available():
+    """Lazily check if pdf2image is available."""
+    global _PDF2IMAGE_AVAILABLE
+    if _PDF2IMAGE_AVAILABLE is None:
+        try:
+            from pdf2image import convert_from_path
+            _PDF2IMAGE_AVAILABLE = True
+        except ImportError:
+            _PDF2IMAGE_AVAILABLE = False
+    return _PDF2IMAGE_AVAILABLE
 
 
 def load_text_from_file(file_path: Union[str, Path], encoding: str = "utf-8") -> str:
@@ -193,13 +209,17 @@ def load_text_from_pdf_ocr(
         >>> # For English scanned PDF
         >>> text = load_text_from_pdf_ocr("scanned_book.pdf", languages=['en'])
     """
-    if not _PDF2IMAGE_AVAILABLE:
+    if not _check_pdf2image_available():
         raise ImportError(
             "pdf2image is required for OCR. Install with: pip install pdf2image\n"
             "Also install poppler-utils: brew install poppler (macOS) or apt install poppler-utils (Linux)"
         )
-    if not _OCR_AVAILABLE:
+    if not _check_ocr_available():
         raise ImportError("easyocr is required for OCR. Install with: pip install easyocr")
+
+    # Import lazily to avoid CUDA conflicts
+    import easyocr
+    from pdf2image import convert_from_path
 
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
@@ -276,5 +296,5 @@ def get_available_loaders() -> dict:
         "file": True,
         "url": _REQUESTS_AVAILABLE and _BS4_AVAILABLE,
         "pdf": _PYPDF_AVAILABLE,
-        "ocr": _OCR_AVAILABLE and _PDF2IMAGE_AVAILABLE,
+        "ocr": _check_ocr_available() and _check_pdf2image_available(),
     }
