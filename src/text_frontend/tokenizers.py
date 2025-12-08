@@ -258,6 +258,14 @@ class CharTokenizer(TokenizerInterface):
         """
         Normalize text, preserving word count.
 
+        ┌─────────────────────────────────────────────────────────────────────┐
+        │ CRITICAL: Word count MUST be preserved for alignment recovery!      │
+        │                                                                     │
+        │   len(text.split()) == len(self.text_normalize(text).split())      │
+        │                                                                     │
+        │ This allows mapping alignment output indices back to original text. │
+        └─────────────────────────────────────────────────────────────────────┘
+
         Words that become empty after normalization are replaced with unk_token.
         """
         words = [self.normalize_for_vocab(w) for w in text.split()]

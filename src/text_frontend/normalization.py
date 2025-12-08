@@ -141,7 +141,11 @@ def expand_number(
     Args:
         word: Input word
         language: Language code for num2words
-        word_joiner: Join multi-word outputs ("" preserves word count, None keeps spaces)
+        word_joiner: Join multi-word outputs to preserve word count:
+            - "" (default): "66" → "sixtysix" (1 word - PRESERVES word count!)
+            - None: "66" → "sixty six" (2 words - BREAKS word count!)
+
+            IMPORTANT: Use "" (default) for alignment to enable word index recovery.
 
     Returns:
         Expanded word or original if not a number
@@ -352,8 +356,21 @@ def normalize_for_mms(
     """
     Normalize text for MMS model.
 
-    Preserves word count:
-    - Optionally expand numbers to spoken form
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │ CRITICAL INVARIANT: Word count MUST be preserved!                       │
+    │                                                                         │
+    │ This enables alignment recovery via word index:                         │
+    │   original_words = text.split()                                         │
+    │   normalized_words = normalize_for_mms(text).split()                    │
+    │   assert len(original_words) == len(normalized_words)  # MUST hold!     │
+    │                                                                         │
+    │ After alignment returns word indices, we can recover original words:    │
+    │   aligned_indices = [3, 5, 7]  # from alignment                         │
+    │   recovered = [original_words[i] for i in aligned_indices]              │
+    └─────────────────────────────────────────────────────────────────────────┘
+
+    Processing:
+    - Optionally expand numbers to spoken form (66 → sixtysix)
     - Remove punctuation (except apostrophe)
     - Remove hyphens
     - Convert to lowercase
@@ -364,7 +381,7 @@ def normalize_for_mms(
         unk_token: Token for unknown/invalid words (default "*")
         expand_numbers: Whether to expand numbers to spoken form
         tn_language: Language code for number expansion
-        word_joiner: String to join multi-word TN outputs
+        word_joiner: String to join multi-word TN outputs (default "" to preserve word count)
 
     Returns:
         Normalized text with same word count as input

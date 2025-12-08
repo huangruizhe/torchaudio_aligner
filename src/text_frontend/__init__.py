@@ -9,6 +9,28 @@ Main functionality:
 - Text normalization and cleanup
 - Romanization for non-Latin scripts (via uroman)
 - Tokenization for CTC models
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CRITICAL DESIGN INVARIANT                                │
+│                                                                             │
+│  All text transformations MUST preserve word count!                         │
+│                                                                             │
+│    len(original_text.split()) == len(normalized_text.split())              │
+│                                                                             │
+│  This enables alignment recovery via word index:                            │
+│                                                                             │
+│    1. Original:   "The price is $66 today"     (5 words)                   │
+│    2. Normalized: "the price is sixtysixdollars today"  (5 words)          │
+│    3. Alignment returns indices: [0, 2, 3, 4]                               │
+│    4. Recover original: ["The", "is", "$66", "today"]                      │
+│                                                                             │
+│  Functions that preserve word count:                                        │
+│    - normalize_for_mms(text, expand_numbers=True)                          │
+│    - romanize_text_aligned(text, language)                                 │
+│    - tokenizer.text_normalize(text)                                        │
+│                                                                             │
+│  Key parameter: word_joiner="" joins multi-word expansions (66→sixtysix)   │
+└─────────────────────────────────────────────────────────────────────────────┘
 """
 
 # Text loading
