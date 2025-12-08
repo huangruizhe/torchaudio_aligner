@@ -1,17 +1,30 @@
 """
 Base classes and data structures for alignment.
+
+Design Philosophy:
+- User-facing classes use SECONDS for all timestamps
+- Internal processing uses frames, converted at boundaries
+- One representation for each concept (no duplication)
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Tuple, Union
+from dataclasses import dataclass, field, asdict
+from typing import Optional, List, Dict, Any, Tuple, Union, Iterator
+import json
 import torch
 
+
+# =============================================================================
+# Internal Token (frame-based, used during alignment)
+# =============================================================================
 
 @dataclass
 class AlignedToken:
     """
     A single aligned token (phone/character/subword).
+
+    This is an INTERNAL class used during the alignment process.
+    Timestamps are in frames (not seconds).
 
     Attributes:
         token_id: Token identifier (string or int)
@@ -20,109 +33,215 @@ class AlignedToken:
         attr: Additional attributes (word index, etc.)
     """
     token_id: Union[str, int]
-    timestamp: int
+    timestamp: int  # Frame index
     score: float = 0.0
     attr: Dict[str, Any] = field(default_factory=dict)
 
+
+# =============================================================================
+# User-facing Word (seconds-based)
+# =============================================================================
 
 @dataclass
 class AlignedWord:
     """
     A word with its alignment information.
 
+    This is the PRIMARY user-facing class. All times are in SECONDS.
+
     Attributes:
-        word: The word text
-        start_time: Start frame index
-        end_time: End frame index (None if not set)
-        phones: List of phone-level alignments
-        score: Word-level confidence score
+        word: The word text (normalized form)
+        start: Start time in seconds
+        end: End time in seconds
+        score: Confidence score (0-1, higher is better)
+        original: Original word form before normalization (if different)
+        index: Word index in the original transcript
+
+    Example:
+        >>> word = result.words[0]
+        >>> print(f"{word.word}: {word.start:.2f}s - {word.end:.2f}s")
+        hello: 0.52s - 0.78s
     """
     word: str
-    start_time: int
-    end_time: Optional[int] = None
-    phones: List[AlignedToken] = field(default_factory=list)
+    start: float  # seconds
+    end: float    # seconds
     score: float = 0.0
+    original: Optional[str] = None
+    index: int = -1
 
     @property
-    def start_seconds(self) -> float:
-        """Start time in seconds (assuming 20ms frames)."""
-        return self.start_time * 0.02
-
-    @property
-    def end_seconds(self) -> Optional[float]:
-        """End time in seconds (assuming 20ms frames)."""
-        return self.end_time * 0.02 if self.end_time is not None else None
-
-    @property
-    def duration(self) -> Optional[float]:
+    def duration(self) -> float:
         """Duration in seconds."""
-        if self.end_time is not None:
-            return (self.end_time - self.start_time) * 0.02
-        return None
+        return self.end - self.start
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        d = {
+            "word": self.word,
+            "start": round(self.start, 3),
+            "end": round(self.end, 3),
+        }
+        if self.original and self.original != self.word:
+            d["original"] = self.original
+        if self.score > 0:
+            d["score"] = round(self.score, 3)
+        if self.index >= 0:
+            d["index"] = self.index
+        return d
+
+    def __repr__(self):
+        if self.original and self.original != self.word:
+            return f"AlignedWord('{self.original}' ({self.word}), {self.start:.2f}s-{self.end:.2f}s)"
+        return f"AlignedWord('{self.word}', {self.start:.2f}s-{self.end:.2f}s)"
+
+
+# =============================================================================
+# Alignment Result (user-facing)
+# =============================================================================
 
 @dataclass
 class AlignmentResult:
     """
     Complete alignment result for an audio file.
 
+    This is the PRIMARY result class. Provides simple, intuitive access
+    to alignment results with all times in seconds.
+
     Attributes:
-        word_alignments: Dict mapping word index to AlignedWord
-        unaligned_indices: List of (start, end) word indices that couldn't be aligned
-        token_alignments: Raw token-level alignments (optional)
-        metadata: Additional metadata (model used, parameters, etc.)
+        words: List of aligned words (sorted by time)
+        unaligned_regions: List of (start_idx, end_idx) for unaligned text
+        metadata: Additional info (duration, model, etc.)
+
+    Example:
+        >>> result = align_long_audio("audio.mp3", "transcript.txt")
+        >>> for word in result:
+        ...     print(f"{word.word}: {word.start:.2f}s")
+        >>> result.save_audacity_labels("labels.txt")
     """
-    word_alignments: Dict[int, AlignedWord]
-    unaligned_indices: List[Tuple[int, int]] = field(default_factory=list)
-    token_alignments: List[AlignedToken] = field(default_factory=list)
+    words: List[AlignedWord] = field(default_factory=list)
+    unaligned_regions: List[Tuple[int, int]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def num_aligned_words(self) -> int:
-        """Number of successfully aligned words."""
-        return len(self.word_alignments)
+    # -------------------------------------------------------------------------
+    # Core properties
+    # -------------------------------------------------------------------------
+
+    def __len__(self) -> int:
+        """Number of aligned words."""
+        return len(self.words)
+
+    def __iter__(self) -> Iterator[AlignedWord]:
+        """Iterate over aligned words."""
+        return iter(self.words)
+
+    def __getitem__(self, idx: int) -> AlignedWord:
+        """Get word by index."""
+        return self.words[idx]
 
     @property
-    def aligned_text(self) -> str:
+    def text(self) -> str:
         """Get the aligned transcript as a string."""
-        words = [w.word for _, w in sorted(self.word_alignments.items())]
-        return " ".join(words)
+        return " ".join(w.word for w in self.words)
 
-    def get_word_at_time(self, time_seconds: float) -> Optional[AlignedWord]:
-        """Find the word at a given time."""
-        frame = int(time_seconds / 0.02)
-        for word in self.word_alignments.values():
-            if word.start_time <= frame:
-                if word.end_time is None or frame <= word.end_time:
-                    return word
+    @property
+    def duration(self) -> float:
+        """Total duration covered by alignment (seconds)."""
+        if not self.words:
+            return 0.0
+        return self.words[-1].end - self.words[0].start
+
+    # -------------------------------------------------------------------------
+    # Query methods
+    # -------------------------------------------------------------------------
+
+    def get_word_at_time(self, time: float) -> Optional[AlignedWord]:
+        """Find the word at a given time (seconds)."""
+        for word in self.words:
+            if word.start <= time <= word.end:
+                return word
         return None
 
-    def to_audacity_labels(self, frame_duration: float = 0.02) -> str:
-        """
-        Export alignment as Audacity labels format.
+    def get_words_in_range(self, start: float, end: float) -> List[AlignedWord]:
+        """Get all words within a time range (seconds)."""
+        return [w for w in self.words if start <= w.start <= end]
 
-        Returns:
-            String with tab-separated labels (start, end, label)
-        """
+    # -------------------------------------------------------------------------
+    # Export methods
+    # -------------------------------------------------------------------------
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary (JSON-serializable)."""
+        return {
+            "words": [w.to_dict() for w in self.words],
+            "unaligned_regions": self.unaligned_regions,
+            "metadata": self.metadata,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        """Convert to JSON string."""
+        return json.dumps(self.to_dict(), indent=indent)
+
+    def save_json(self, path: str) -> str:
+        """Save alignment as JSON file."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.to_json())
+        return path
+
+    def to_audacity_labels(self) -> str:
+        """Export as Audacity label format."""
         lines = []
-        for _, word in sorted(self.word_alignments.items()):
-            t = word.start_time * frame_duration
-            lines.append(f"{t:.2f}\t{t:.2f}\t{word.word}")
+        for word in self.words:
+            lines.append(f"{word.start:.6f}\t{word.end:.6f}\t{word.word}")
         return "\n".join(lines)
 
+    def save_audacity_labels(self, path: str) -> str:
+        """Save as Audacity label file."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.to_audacity_labels())
+        return path
+
+    def to_srt(self, words_per_subtitle: int = 10) -> str:
+        """Export as SRT subtitle format."""
+        lines = []
+        idx = 1
+        for i in range(0, len(self.words), words_per_subtitle):
+            chunk = self.words[i:i + words_per_subtitle]
+            if not chunk:
+                continue
+            start = chunk[0].start
+            end = chunk[-1].end
+            text = " ".join(w.word for w in chunk)
+
+            # Format: HH:MM:SS,mmm
+            start_str = f"{int(start//3600):02d}:{int((start%3600)//60):02d}:{int(start%60):02d},{int((start%1)*1000):03d}"
+            end_str = f"{int(end//3600):02d}:{int((end%3600)//60):02d}:{int(end%60):02d},{int((end%1)*1000):03d}"
+
+            lines.append(f"{idx}")
+            lines.append(f"{start_str} --> {end_str}")
+            lines.append(text)
+            lines.append("")
+            idx += 1
+
+        return "\n".join(lines)
+
+    def save_srt(self, path: str, words_per_subtitle: int = 10) -> str:
+        """Save as SRT subtitle file."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.to_srt(words_per_subtitle))
+        return path
+
     def to_textgrid(self) -> str:
-        """Export alignment as Praat TextGrid format."""
-        # Basic TextGrid format
-        lines = ['File type = "ooTextFile"', 'Object class = "TextGrid"', '']
+        """Export as Praat TextGrid format."""
+        if not self.words:
+            return ""
 
-        if not self.word_alignments:
-            return "\n".join(lines)
+        xmin = self.words[0].start
+        xmax = self.words[-1].end
 
-        sorted_words = sorted(self.word_alignments.items())
-        xmin = sorted_words[0][1].start_time * 0.02
-        xmax = sorted_words[-1][1].end_time * 0.02 if sorted_words[-1][1].end_time else xmin + 1.0
-
-        lines.extend([
+        lines = [
+            'File type = "ooTextFile"',
+            'Object class = "TextGrid"',
+            '',
             f'xmin = {xmin}',
             f'xmax = {xmax}',
             'tiers? <exists>',
@@ -133,21 +252,53 @@ class AlignmentResult:
             '        name = "words"',
             f'        xmin = {xmin}',
             f'        xmax = {xmax}',
-            f'        intervals: size = {len(sorted_words)}',
-        ])
+            f'        intervals: size = {len(self.words)}',
+        ]
 
-        for i, (_, word) in enumerate(sorted_words, 1):
-            start = word.start_time * 0.02
-            end = word.end_time * 0.02 if word.end_time else start + 0.1
+        for i, word in enumerate(self.words, 1):
             lines.extend([
                 f'        intervals [{i}]:',
-                f'            xmin = {start}',
-                f'            xmax = {end}',
+                f'            xmin = {word.start}',
+                f'            xmax = {word.end}',
                 f'            text = "{word.word}"',
             ])
 
         return "\n".join(lines)
 
+    def save_textgrid(self, path: str) -> str:
+        """Save as Praat TextGrid file."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.to_textgrid())
+        return path
+
+    # -------------------------------------------------------------------------
+    # Summary
+    # -------------------------------------------------------------------------
+
+    def summary(self) -> str:
+        """Get a summary string."""
+        lines = [
+            f"Alignment Result:",
+            f"  Words aligned: {len(self.words)}",
+        ]
+        if self.unaligned_regions:
+            lines.append(f"  Unaligned regions: {len(self.unaligned_regions)}")
+        if self.words:
+            lines.append(f"  Time range: {self.words[0].start:.2f}s - {self.words[-1].end:.2f}s")
+        if "total_words" in self.metadata:
+            coverage = 100.0 * len(self.words) / self.metadata["total_words"]
+            lines.append(f"  Coverage: {coverage:.1f}%")
+        if "audio_duration" in self.metadata:
+            lines.append(f"  Audio duration: {self.metadata['audio_duration']:.1f}s")
+        return "\n".join(lines)
+
+    def __repr__(self):
+        return f"AlignmentResult({len(self.words)} words)"
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
 
 @dataclass
 class AlignmentConfig:
@@ -155,135 +306,67 @@ class AlignmentConfig:
     Configuration for alignment.
 
     Attributes:
-        backend: Alignment backend ("wfst", "mfa", "gentle")
-        language: ISO 639-3 language code
+        language: ISO 639-3 language code (e.g., "eng", "deu", "cmn")
         sample_rate: Audio sample rate (default 16000)
         segment_size: Segment size in seconds for long audio
         overlap: Overlap between segments in seconds
         batch_size: Batch size for neural network inference
-        device: Device to run on ("cuda", "cpu", "mps")
-
-        # WFST-specific
-        skip_penalty: Penalty for skipping words (default -0.5)
-        return_penalty: Penalty for return arcs (default -18.0)
-        blank_penalty: Penalty for blank tokens (default 0)
-
-        # Quality thresholds
-        per_frame_score_threshold: Min score per frame (default 0.5)
-        skip_percentage_threshold: Max skip percentage (default 0.2)
-        neighborhood_size: Neighborhood for LIS filtering (default 5)
+        device: Device to run on ("cuda", "cpu", "auto")
     """
-    backend: str = "wfst"
-    language: Optional[str] = None
+    language: str = "eng"
     sample_rate: int = 16000
     segment_size: float = 15.0
     overlap: float = 2.0
-    shortest_segment_size: float = 0.2
     batch_size: int = 32
-    device: Optional[str] = None
-    frame_duration: float = 0.02
+    device: str = "auto"
 
-    # WFST-specific parameters
+    # Internal parameters (advanced users only)
+    frame_duration: float = 0.02
     skip_penalty: float = -0.5
     return_penalty: float = -18.0
     blank_penalty: float = 0.0
-
-    # Quality thresholds
-    per_frame_score_threshold: float = 0.5
-    skip_percentage_threshold: float = 0.2
-    return_arcs_num_threshold: int = 3
     neighborhood_size: int = 5
 
-    # Extra options
-    extra_options: Dict[str, Any] = field(default_factory=dict)
-
     def __post_init__(self):
-        if self.device is None:
+        if self.device == "auto":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
+
+# =============================================================================
+# Backend base class (for extensibility)
+# =============================================================================
 
 class AlignerBackend(ABC):
     """
     Abstract base class for alignment backends.
 
-    All alignment backends must implement:
-    - align(): Perform alignment
-    - supports_language(): Check language support
-
-    Optional:
-    - load(): Load any required models
-    - unload(): Free resources
+    Implement this to add new alignment methods (MFA, Gentle, etc.)
     """
 
     BACKEND_NAME: str = "base"
-    SUPPORTED_LANGUAGES: List[str] = []
 
     def __init__(self, config: AlignmentConfig):
         self.config = config
         self._loaded = False
 
-    @property
-    def name(self) -> str:
-        """Backend name for identification."""
-        return self.BACKEND_NAME
-
-    @property
-    def is_loaded(self) -> bool:
-        """Whether any required models are loaded."""
-        return self._loaded
+    @abstractmethod
+    def align(self, waveform: torch.Tensor, text: str, **kwargs) -> AlignmentResult:
+        """Perform alignment. Returns AlignmentResult with times in seconds."""
+        raise NotImplementedError
 
     def load(self) -> None:
-        """Load any required models. Override in subclasses."""
+        """Load models. Override in subclasses."""
         self._loaded = True
 
     def unload(self) -> None:
         """Free resources. Override in subclasses."""
         self._loaded = False
 
-    @abstractmethod
-    def align(
-        self,
-        waveform: torch.Tensor,
-        text: str,
-        **kwargs,
-    ) -> AlignmentResult:
-        """
-        Perform speech-to-text alignment.
-
-        Args:
-            waveform: Audio tensor of shape (1, T) or (T,)
-            text: Text to align
-            **kwargs: Additional backend-specific arguments
-
-        Returns:
-            AlignmentResult with word-level alignments
-        """
-        raise NotImplementedError
-
-    def supports_language(self, language: str) -> bool:
-        """
-        Check if the backend supports a given language.
-
-        Args:
-            language: ISO 639-3 language code
-
-        Returns:
-            True if supported
-        """
-        if not self.SUPPORTED_LANGUAGES:
-            return True  # Empty = all languages
-        return language.lower() in [l.lower() for l in self.SUPPORTED_LANGUAGES]
-
     def __enter__(self):
-        """Context manager entry."""
         if not self._loaded:
             self.load()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+    def __exit__(self, *args):
         self.unload()
         return False
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(loaded={self._loaded})"

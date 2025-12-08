@@ -11,6 +11,9 @@ from typing import Dict, List, Tuple, Optional
 import torch
 import logging
 
+# Import both the internal AlignedToken and the user-facing AlignedWord
+from alignment.base import AlignedToken, AlignedWord as AlignedWordSeconds
+
 logger = logging.getLogger(__name__)
 
 
@@ -768,3 +771,72 @@ def get_final_word_alignment(
     logger.debug(f"Built word alignment: {len(word_alignment)} words")
 
     return word_alignment
+
+
+def get_final_word_alignment_seconds(
+    alignment_results: List[AlignedToken],
+    text: str,
+    original_text_words: List[str],
+    tokenizer,
+    frame_duration: float = 0.02,
+) -> List[AlignedWordSeconds]:
+    """
+    Convert token-level alignment to word-level alignment with times in SECONDS.
+
+    This is the user-facing function that returns a clean list of AlignedWord
+    objects with all times converted to seconds.
+
+    Args:
+        alignment_results: List of AlignedToken from concat_alignments
+        text: Normalized text (space-separated words)
+        original_text_words: Original (non-normalized) words
+        tokenizer: Tokenizer with id2token mapping
+        frame_duration: Duration per frame in seconds (default 0.02 = 20ms)
+
+    Returns:
+        List of AlignedWord objects sorted by start time.
+        All times are in seconds, ready for user consumption.
+    """
+    # First, get the frame-based alignment
+    word_alignment_frames = get_final_word_alignment(
+        alignment_results,
+        text,
+        tokenizer,
+    )
+
+    if not word_alignment_frames:
+        return []
+
+    # Convert to seconds-based AlignedWord objects
+    words = []
+    text_splitted = text.split()
+
+    for idx, aligned_word_internal in sorted(word_alignment_frames.items()):
+        # Skip None words (end-of-text markers)
+        if aligned_word_internal.word is None:
+            continue
+
+        # Convert frames to seconds
+        start_sec = aligned_word_internal.start_time * frame_duration
+        if aligned_word_internal.end_time is not None:
+            end_sec = aligned_word_internal.end_time * frame_duration
+        else:
+            end_sec = start_sec + 0.5  # Fallback (shouldn't happen with _compute_word_end_times)
+
+        # Get original word form if different from normalized
+        original = None
+        if idx < len(original_text_words):
+            orig_word = original_text_words[idx]
+            if orig_word.lower() != aligned_word_internal.word.lower():
+                original = orig_word
+
+        words.append(AlignedWordSeconds(
+            word=aligned_word_internal.word,
+            start=start_sec,
+            end=end_sec,
+            score=aligned_word_internal.score,
+            original=original,
+            index=idx,
+        ))
+
+    return words
