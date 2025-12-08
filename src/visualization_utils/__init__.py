@@ -9,10 +9,14 @@ This module provides tools for:
 
 Usage:
     from visualization_utils import (
+        # Simple API (recommended)
+        play_word,
+        play_segment,
+        play_random,
+        play_words_sequential,
+        # Export
         get_audacity_labels,
         get_gentle_visualization,
-        preview_word,
-        preview_all_words,
     )
 """
 
@@ -28,9 +32,15 @@ from .gentle import (
 )
 
 from .audio_preview import (
-    # New API (seconds-based)
+    # Simple API (recommended - uses audio file directly)
+    play_word,
+    play_segment,
+    play_random,
+    play_words_sequential,
+    # Waveform API (seconds-based)
     preview_word_seconds,
     preview_segment_seconds,
+    preview_random_segment_seconds,
     # Legacy API (frame-based)
     preview_word,
     preview_word_by_index,
@@ -47,10 +57,16 @@ __all__ = [
     "get_gentle_visualization",
     "save_gentle_html",
     "create_interactive_demo",
-    # Audio preview (new API)
+    # Audio preview - Simple API (recommended)
+    "play_word",
+    "play_segment",
+    "play_random",
+    "play_words_sequential",
+    # Audio preview - Waveform API
     "preview_word_seconds",
     "preview_segment_seconds",
-    # Audio preview (legacy API)
+    "preview_random_segment_seconds",
+    # Audio preview - Legacy API
     "preview_word",
     "preview_word_by_index",
     "preview_segment",

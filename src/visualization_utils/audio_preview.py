@@ -3,19 +3,200 @@ Audio preview utilities for alignment verification.
 
 Provides functions to play audio segments corresponding to aligned words.
 
-NEW API (recommended):
-    # With seconds-based AlignmentResult
+SIMPLE API (recommended - uses audio file directly):
     result = align_long_audio(audio, text)
+    play_word(result, 10)  # Play word at index 10
+    play_segment(result, 100, num_words=20)  # Play 20 words starting at 100
+    play_random(result, num_words=30)  # Play random 30-word segment
+
+WAVEFORM API (for when you already have waveform loaded):
     preview_word_seconds(waveform, result.words[10], sample_rate)
     preview_segment_seconds(waveform, result.words[100:120], sample_rate)
 
-LEGACY API (for backwards compatibility):
-    # With frame-based word_alignment dict
+LEGACY API (for backwards compatibility with frame-based dict):
     preview_word(waveform, word_alignment, word_idx, frame_duration=0.02)
 """
 
 from typing import Dict, Any, Optional, Union, List, Tuple
+from pathlib import Path
 import random
+
+
+# =============================================================================
+# SIMPLE API: Works with AlignmentResult and audio file path
+# =============================================================================
+
+def play_word(result, word_idx: int, audio_file: str = None):
+    """
+    Play audio for a specific word.
+
+    Args:
+        result: AlignmentResult from align_long_audio()
+        word_idx: Index of word to play (0-based position in result.words)
+        audio_file: Path to audio file (uses result.metadata if not provided)
+
+    Returns:
+        IPython.display.Audio object
+
+    Example:
+        >>> result = align_long_audio("audio.mp3", "text.txt")
+        >>> play_word(result, 10)  # Play the 11th word
+    """
+    from IPython.display import Audio
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        raise ImportError("pydub required: pip install pydub")
+
+    # Get audio file
+    if audio_file is None:
+        audio_file = result.metadata.get("audio_file")
+    if not audio_file:
+        raise ValueError("audio_file not found. Pass it explicitly or use align_long_audio().")
+
+    if word_idx < 0 or word_idx >= len(result.words):
+        print(f"Word index {word_idx} out of range [0, {len(result.words)})")
+        return None
+
+    word = result.words[word_idx]
+    start_sec = word.start_seconds()
+    end_sec = word.end_seconds()
+
+    # Load and slice audio
+    audio = AudioSegment.from_file(audio_file).set_channels(1)
+    segment = audio[start_sec * 1000:end_sec * 1000]
+
+    # Display info
+    display_text = word.original if word.original else word.word
+    print(f"[{word_idx}] '{display_text}': {start_sec:.2f}s - {end_sec:.2f}s")
+
+    return Audio(segment.get_array_of_samples(), rate=segment.frame_rate)
+
+
+def play_segment(result, start_idx: int, num_words: int = 20, audio_file: str = None):
+    """
+    Play audio for a segment of consecutive words.
+
+    Args:
+        result: AlignmentResult from align_long_audio()
+        start_idx: Starting word index
+        num_words: Number of words to play
+        audio_file: Path to audio file (uses result.metadata if not provided)
+
+    Returns:
+        IPython.display.Audio object
+
+    Example:
+        >>> result = align_long_audio("audio.mp3", "text.txt")
+        >>> play_segment(result, 100, num_words=30)
+    """
+    from IPython.display import Audio
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        raise ImportError("pydub required: pip install pydub")
+
+    # Get audio file
+    if audio_file is None:
+        audio_file = result.metadata.get("audio_file")
+    if not audio_file:
+        raise ValueError("audio_file not found. Pass it explicitly or use align_long_audio().")
+
+    # Get words
+    end_idx = min(start_idx + num_words, len(result.words))
+    words = result.words[start_idx:end_idx]
+
+    if not words:
+        print("No words in range")
+        return None
+
+    start_sec = words[0].start_seconds()
+    end_sec = words[-1].end_seconds()
+
+    # Load and slice audio
+    audio = AudioSegment.from_file(audio_file).set_channels(1)
+    segment = audio[start_sec * 1000:end_sec * 1000]
+
+    # Display info
+    text = " ".join(w.word for w in words)
+    print(f"Words {start_idx}-{end_idx-1} ({start_sec:.2f}s - {end_sec:.2f}s):")
+    print(f"  {text[:150]}{'...' if len(text) > 150 else ''}")
+
+    return Audio(segment.get_array_of_samples(), rate=segment.frame_rate)
+
+
+def play_random(result, num_words: int = 30, audio_file: str = None):
+    """
+    Play a random segment of words.
+
+    Args:
+        result: AlignmentResult from align_long_audio()
+        num_words: Number of words to play
+        audio_file: Path to audio file (uses result.metadata if not provided)
+
+    Returns:
+        Tuple of (Audio object, start_idx)
+
+    Example:
+        >>> result = align_long_audio("audio.mp3", "text.txt")
+        >>> play_random(result, num_words=30)
+    """
+    if len(result) < num_words:
+        num_words = len(result)
+
+    start_idx = random.randint(0, max(0, len(result) - num_words))
+    audio = play_segment(result, start_idx, num_words, audio_file)
+    return audio, start_idx
+
+
+def play_words_sequential(result, start_idx: int = 0, num_words: int = 10, audio_file: str = None):
+    """
+    Play words one by one with their text displayed.
+
+    Args:
+        result: AlignmentResult from align_long_audio()
+        start_idx: Starting word index
+        num_words: Number of words to play
+        audio_file: Path to audio file (uses result.metadata if not provided)
+
+    Example:
+        >>> result = align_long_audio("audio.mp3", "text.txt")
+        >>> play_words_sequential(result, start_idx=50, num_words=10)
+    """
+    from IPython.display import Audio, display
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        raise ImportError("pydub required: pip install pydub")
+
+    # Get audio file
+    if audio_file is None:
+        audio_file = result.metadata.get("audio_file")
+    if not audio_file:
+        raise ValueError("audio_file not found. Pass it explicitly or use align_long_audio().")
+
+    # Load audio once
+    audio = AudioSegment.from_file(audio_file).set_channels(1)
+
+    print(f"Playing words {start_idx} to {start_idx + num_words - 1}:")
+    print("=" * 50)
+
+    end_idx = min(start_idx + num_words, len(result.words))
+    words = result.words[start_idx:end_idx]
+
+    for i, word in enumerate(words):
+        start_sec = word.start_seconds()
+        # Use next word's start or add buffer for end time
+        if i + 1 < len(words):
+            end_sec = words[i + 1].start_seconds()
+        else:
+            end_sec = word.end_seconds() + 0.3
+
+        display_text = word.original if word.original else word.word
+        print(f"\n[{start_idx + i}] '{display_text}' ({start_sec:.2f}s - {end_sec:.2f}s):")
+
+        segment = audio[start_sec * 1000:end_sec * 1000]
+        display(Audio(segment.get_array_of_samples(), rate=segment.frame_rate))
 
 
 # =============================================================================
