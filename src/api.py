@@ -109,10 +109,17 @@ def align_long_audio(
 
     frame_duration = 0.02  # 20ms frames (standard for MMS-FA)
 
+    # Get file names for display
+    audio_name = str(audio) if isinstance(audio, (str, Path)) else "<tensor>"
+    text_name = str(text) if isinstance(text, (str, Path)) else "<string>"
+
     if verbose:
         logger.info("=" * 60)
         logger.info("TorchAudio Long-Form Aligner")
         logger.info("=" * 60)
+        logger.info(f"Audio: {audio_name}")
+        logger.info(f"Text: {text_name}")
+        logger.info(f"Language: {language}")
         logger.info(f"Device: {device}")
 
     # =========================================================================
@@ -144,9 +151,10 @@ def align_long_audio(
         waveform = waveform.unsqueeze(0)
 
     duration_sec = waveform.size(1) / sample_rate
+    duration_min = duration_sec / 60
 
     if verbose:
-        logger.info(f"  Processed: {waveform.shape}, {sample_rate}Hz, {duration_sec:.1f}s")
+        logger.info(f"  Duration: {duration_sec:.1f}s ({duration_min:.1f} min)")
 
     # Segment audio
     from audio_frontend import segment_waveform
