@@ -306,7 +306,11 @@ def _normalize_word_for_mms(word: str, unk_token: str = "*") -> str:
     """Normalize a single word for MMS model."""
     word = word.translate(str.maketrans("", "", _MMS_PUNCTUATION))
     word = word.lower()
-    word = word.replace("'", "'")
+    # Normalize all apostrophe variants to straight apostrophe
+    word = word.replace("'", "'")  # Right single quotation mark
+    word = word.replace("'", "'")  # Left single quotation mark
+    word = word.replace("`", "'")  # Backtick
+    word = word.replace("´", "'")  # Acute accent
     word = word.replace("-", "")
     if len(word) == 0:
         return unk_token

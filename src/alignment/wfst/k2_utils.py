@@ -839,11 +839,12 @@ def get_final_word_alignment_seconds(
         else:
             end_sec = start_sec + 0.5  # Fallback
 
-        # Get original word form if different from normalized
+        # Get original word form
+        # Always store original if: word is "*" (unknown), or original differs from normalized
         original = None
         if idx < len(original_text_words):
             orig_word = original_text_words[idx]
-            if orig_word.lower() != aligned_word_internal.word.lower():
+            if aligned_word_internal.word == "*" or orig_word.lower() != aligned_word_internal.word.lower():
                 original = orig_word
 
         # Build char-level alignments for this word
