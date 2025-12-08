@@ -15,7 +15,7 @@ def preview_word(
     word_idx: int,
     sample_rate: int = 16000,
     frame_duration: float = 0.02,
-    padding_frames: int = 2,
+    padding_frames: int = 0,
 ):
     """
     Preview audio for a specific aligned word.
