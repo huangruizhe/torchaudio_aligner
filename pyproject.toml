@@ -40,16 +40,139 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# For torchaudio >= 2.8
-torchcodec = ["torchcodec>=0.1.0"]
+# ============================================
+# Core optional dependencies
+# ============================================
 
-# Fallback audio loading
-soundfile = ["soundfile>=0.12.0"]
+# Audio loading backends
+audio = [
+    "torchcodec>=0.1.0",  # For torchaudio >= 2.8
+    "soundfile>=0.12.0",  # Fallback audio loading
+]
 
-# Full installation with all optional dependencies
-all = [
+# Text loading and processing
+text = [
+    "requests>=2.28.0",       # URL text loading
+    "beautifulsoup4>=4.11.0", # HTML parsing
+    "pypdf>=3.0.0",           # PDF text extraction
+]
+
+# Text normalization (numbers to spoken form)
+tn = [
+    "num2words>=0.5.0",
+]
+
+# Romanization for non-Latin scripts
+romanization = [
+    "uroman-python>=1.2.0",
+    "zhon>=2.0.0",  # CJK text processing
+]
+
+# Tokenizers (BPE and phoneme)
+tokenizers = [
+    "sentencepiece>=0.2.0",  # BPE tokenizer
+    "cmudict>=1.0.0",        # CMU pronunciation dictionary
+    "g2p_en>=2.1.0",         # English grapheme-to-phoneme
+]
+
+# ============================================
+# Enhanced features
+# ============================================
+
+# Japanese morphological romanization (higher quality than uroman)
+japanese = [
+    "cutlet>=0.4.0",  # Installs fugashi and unidic automatically
+]
+
+# OCR for scanned PDFs (e.g., Hindi documents)
+# Also requires: brew install poppler (macOS) or apt install poppler-utils (Linux)
+ocr = [
+    "easyocr>=1.7.0",
+    "pdf2image>=1.16.0",
+]
+
+# Audio enhancement options
+enhancement = [
+    "pyloudnorm>=0.1.0",  # Loudness normalization
+]
+
+# Demucs - Source separation to extract vocals
+demucs = [
+    "demucs>=4.0.0",
+    "pyloudnorm>=0.1.0",
+]
+
+# Lightweight noise reduction (CPU-friendly)
+noisereduce = [
+    "noisereduce>=3.0.0",
+]
+
+# DeepFilterNet - Deep learning noise suppression
+deepfilter = [
+    "deepfilternet>=0.5.0",
+]
+
+# ============================================
+# Alternative alignment backends
+# ============================================
+
+# NeMo forced aligner
+nemo = [
+    "nemo_toolkit[asr]>=1.20.0",
+]
+
+# Montreal Forced Aligner
+# Note: MFA is typically installed via conda: conda install -c conda-forge montreal-forced-aligner
+# This provides the Python bindings if installed via pip
+mfa = [
+    "montreal-forced-aligner>=3.0.0",
+]
+
+# WFST operations (k2)
+# Note: k2 requires specific version matching your PyTorch/CUDA version
+# See: https://k2-fsa.github.io/k2/installation.html
+# Install manually: pip install k2 -f https://k2-fsa.org/nightly/
+wfst = []  # Empty - user must install k2 manually due to version constraints
+
+# ============================================
+# Bundle installations
+# ============================================
+
+# Core features (recommended for most users)
+core = [
     "torchcodec>=0.1.0",
     "soundfile>=0.12.0",
+    "requests>=2.28.0",
+    "beautifulsoup4>=4.11.0",
+    "pypdf>=3.0.0",
+    "num2words>=0.5.0",
+    "uroman-python>=1.2.0",
+    "zhon>=2.0.0",
+    "sentencepiece>=0.2.0",
+]
+
+# Full installation (everything except alternative backends)
+full = [
+    # Audio
+    "torchcodec>=0.1.0",
+    "soundfile>=0.12.0",
+    # Text
+    "requests>=2.28.0",
+    "beautifulsoup4>=4.11.0",
+    "pypdf>=3.0.0",
+    # TN
+    "num2words>=0.5.0",
+    # Romanization
+    "uroman-python>=1.2.0",
+    "zhon>=2.0.0",
+    # Tokenizers
+    "sentencepiece>=0.2.0",
+    "cmudict>=1.0.0",
+    "g2p_en>=2.1.0",
+    # Japanese
+    "cutlet>=0.4.0",
+    # Enhancement
+    "pyloudnorm>=0.1.0",
 ]
 
 # Development dependencies
@@ -58,6 +181,13 @@ dev = [
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "ipython>=8.0.0",
+]
+
+# Testing dependencies (minimal for CI)
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
 ]
 
 [project.urls]
@@ -66,8 +196,8 @@ Documentation = "https://github.com/huangruizhe/torchaudio-aligner"
 Repository = "https://github.com/huangruizhe/torchaudio-aligner"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["torchaudio_aligner*"]
+where = ["src"]
+include = ["*"]
 
 [tool.black]
 line-length = 100
@@ -81,3 +211,4 @@ ignore = ["E501"]  # Line too long (handled by black)
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["src"]

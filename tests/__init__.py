@@ -1,1 +1,1 @@
-# Tests for torchaudio_aligner
+"""Test suite for torchaudio_aligner."""

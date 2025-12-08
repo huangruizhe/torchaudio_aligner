@@ -36,28 +36,9 @@ def get_audacity_labels(
     sorted_items = sorted(word_alignment.items())
 
     for i, (word_idx, word) in enumerate(sorted_items):
-        # Get start time
-        if hasattr(word.start_time, 'item'):
-            start_sec = word.start_time.item() * frame_duration
-        else:
-            start_sec = word.start_time * frame_duration
-
-        # Get end time
-        if word.end_time is not None:
-            if hasattr(word.end_time, 'item'):
-                end_sec = word.end_time.item() * frame_duration
-            else:
-                end_sec = word.end_time * frame_duration
-        elif i + 1 < len(sorted_items):
-            # Use next word's start as end
-            next_word = sorted_items[i + 1][1]
-            if hasattr(next_word.start_time, 'item'):
-                end_sec = next_word.start_time.item() * frame_duration
-            else:
-                end_sec = next_word.start_time * frame_duration
-        else:
-            # Last word - use default duration
-            end_sec = start_sec + 0.5
+        # Get times - AlignedWord now has start_seconds()/end_seconds() methods
+        start_sec = word.start_seconds(frame_duration)
+        end_sec = word.end_seconds(frame_duration)
 
         # Get word text
         label = word.word if word.word else f"[{word_idx}]"

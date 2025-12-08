@@ -294,14 +294,14 @@ class GentleAligner(AlignerBackend):
             case = word_data.get("case", "not-found")
 
             if case == "success":
-                start_time = int(word_data.get("start", 0) / frame_duration)
-                end_time = int(word_data.get("end", 0) / frame_duration)
+                start_frame = int(word_data.get("start", 0) / frame_duration)
+                end_frame = int(word_data.get("end", 0) / frame_duration)
 
-                # Parse phones
-                phones = []
-                phone_time = start_time
+                # Parse phones as chars
+                chars = []
+                phone_time = start_frame
                 for phone_data in word_data.get("phones", []):
-                    phones.append(AlignedToken(
+                    chars.append(AlignedToken(
                         token_id=phone_data.get("phone", ""),
                         timestamp=phone_time,
                         score=1.0,
@@ -310,9 +310,8 @@ class GentleAligner(AlignerBackend):
 
                 word_alignments[idx] = AlignedWord(
                     word=word_data.get("word", ""),
-                    start_time=start_time,
-                    end_time=end_time,
-                    phones=phones,
+                    start_frame=start_frame,
+                    end_frame=end_frame,
                     score=1.0,
                 )
             else:
@@ -355,11 +354,11 @@ class GentleAligner(AlignerBackend):
                 "word": word.word,
                 "alignedWord": word.word.lower(),
                 "case": "success",
-                "start": f"{word.start_time * frame_duration:.2f}",
-                "end": f"{word.end_time * frame_duration:.2f}" if word.end_time else f"{word.start_time * frame_duration + 0.1:.2f}",
+                "start": f"{word.start_seconds(frame_duration):.2f}",
+                "end": f"{word.end_seconds(frame_duration):.2f}",
                 "phones": [
                     {"phone": p.token_id, "duration": f"{frame_duration:.2f}"}
-                    for p in word.phones
+                    for p in word.chars
                 ],
             })
 

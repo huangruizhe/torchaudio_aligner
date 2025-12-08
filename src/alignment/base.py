@@ -84,17 +84,21 @@ class AlignedChar:
 # User-facing Word (seconds-based)
 # =============================================================================
 
+# Default frame duration (20ms per frame, 50 frames/second)
+DEFAULT_FRAME_DURATION = 0.02
+
+
 @dataclass
 class AlignedWord:
     """
     A word with its alignment information.
 
-    This is the PRIMARY user-facing class. All times are in SECONDS.
+    Primary attributes are in FRAMES. Call start_seconds()/end_seconds() for seconds.
 
     Attributes:
         word: The word text (normalized form)
-        start: Start time in seconds
-        end: End time in seconds
+        start_frame: Start frame index
+        end_frame: End frame index
         score: Confidence score (average of char scores, higher is better)
         original: Original word form before normalization (if different)
         index: Word index in the original transcript
@@ -102,22 +106,33 @@ class AlignedWord:
 
     Example:
         >>> word = result.words[0]
-        >>> print(f"{word.word}: {word.start:.2f}s - {word.end:.2f}s (score: {word.score:.2f})")
-        >>> for char in word.chars:
-        ...     print(f"  {char.char}: {char.start:.3f}s")
+        >>> print(f"{word.word}: {word.start_seconds():.2f}s - {word.end_seconds():.2f}s")
+        >>> print(f"Frames: {word.start_frame} - {word.end_frame}")
     """
     word: str
-    start: float  # seconds
-    end: float    # seconds
+    start_frame: int
+    end_frame: int
     score: float = 0.0
     original: Optional[str] = None
     index: int = -1
     chars: List[AlignedChar] = field(default_factory=list)
 
+    def start_seconds(self, frame_duration: float = DEFAULT_FRAME_DURATION) -> float:
+        """Get start time in seconds."""
+        return self.start_frame * frame_duration
+
+    def end_seconds(self, frame_duration: float = DEFAULT_FRAME_DURATION) -> float:
+        """Get end time in seconds."""
+        return self.end_frame * frame_duration
+
+    def duration_seconds(self, frame_duration: float = DEFAULT_FRAME_DURATION) -> float:
+        """Get duration in seconds."""
+        return (self.end_frame - self.start_frame) * frame_duration
+
     @property
-    def duration(self) -> float:
-        """Duration in seconds."""
-        return self.end - self.start
+    def duration_frames(self) -> int:
+        """Duration in frames."""
+        return self.end_frame - self.start_frame
 
     @property
     def confidence(self) -> float:
@@ -144,12 +159,12 @@ class AlignedWord:
             return f"{self.original} ({self.word})"
         return self.word
 
-    def to_dict(self, include_chars: bool = False) -> Dict[str, Any]:
-        """Convert to dictionary."""
+    def to_dict(self, include_chars: bool = False, frame_duration: float = DEFAULT_FRAME_DURATION) -> Dict[str, Any]:
+        """Convert to dictionary (times in seconds for JSON export)."""
         d = {
             "word": self.word,
-            "start": round(self.start, 3),
-            "end": round(self.end, 3),
+            "start": round(self.start_seconds(frame_duration), 3),
+            "end": round(self.end_seconds(frame_duration), 3),
         }
         if self.original and self.original != self.word:
             d["original"] = self.original
@@ -163,9 +178,11 @@ class AlignedWord:
 
     def __repr__(self):
         score_str = f", score={self.score:.2f}" if self.score > 0 else ""
+        start_s = self.start_seconds()
+        end_s = self.end_seconds()
         if self.original and self.original != self.word:
-            return f"AlignedWord('{self.original}' ({self.word}), {self.start:.2f}s-{self.end:.2f}s{score_str})"
-        return f"AlignedWord('{self.word}', {self.start:.2f}s-{self.end:.2f}s{score_str})"
+            return f"AlignedWord('{self.original}' ({self.word}), {start_s:.2f}s-{end_s:.2f}s{score_str})"
+        return f"AlignedWord('{self.word}', {start_s:.2f}s-{end_s:.2f}s{score_str})"
 
 
 # =============================================================================
@@ -189,7 +206,7 @@ class AlignmentResult:
     Example:
         >>> result = align_long_audio("audio.mp3", "transcript.txt")
         >>> for word in result:
-        ...     print(f"{word.word}: {word.start:.2f}s")
+        ...     print(f"{word.word}: {word.start_seconds():.2f}s")
         >>> result.save_audacity_labels("labels.txt")
         >>> print(result.statistics())
     """
@@ -224,7 +241,7 @@ class AlignmentResult:
         """Total duration covered by alignment (seconds)."""
         if not self.words:
             return 0.0
-        return self.words[-1].end - self.words[0].start
+        return self.words[-1].end_seconds() - self.words[0].start_seconds()
 
     # -------------------------------------------------------------------------
     # Query methods
@@ -233,13 +250,13 @@ class AlignmentResult:
     def get_word_at_time(self, time: float) -> Optional[AlignedWord]:
         """Find the word at a given time (seconds)."""
         for word in self.words:
-            if word.start <= time <= word.end:
+            if word.start_seconds() <= time <= word.end_seconds():
                 return word
         return None
 
     def get_words_in_range(self, start: float, end: float) -> List[AlignedWord]:
         """Get all words within a time range (seconds)."""
-        return [w for w in self.words if start <= w.start <= end]
+        return [w for w in self.words if start <= w.start_seconds() <= end]
 
     # -------------------------------------------------------------------------
     # Export methods
@@ -267,7 +284,7 @@ class AlignmentResult:
         """Export as Audacity label format."""
         lines = []
         for word in self.words:
-            lines.append(f"{word.start:.6f}\t{word.end:.6f}\t{word.word}")
+            lines.append(f"{word.start_seconds():.6f}\t{word.end_seconds():.6f}\t{word.word}")
         return "\n".join(lines)
 
     def save_audacity_labels(self, path: str) -> str:
@@ -284,8 +301,8 @@ class AlignmentResult:
             chunk = self.words[i:i + words_per_subtitle]
             if not chunk:
                 continue
-            start = chunk[0].start
-            end = chunk[-1].end
+            start = chunk[0].start_seconds()
+            end = chunk[-1].end_seconds()
             text = " ".join(w.word for w in chunk)
 
             # Format: HH:MM:SS,mmm
@@ -311,8 +328,8 @@ class AlignmentResult:
         if not self.words:
             return ""
 
-        xmin = self.words[0].start
-        xmax = self.words[-1].end
+        xmin = self.words[0].start_seconds()
+        xmax = self.words[-1].end_seconds()
 
         lines = [
             'File type = "ooTextFile"',
@@ -334,8 +351,8 @@ class AlignmentResult:
         for i, word in enumerate(self.words, 1):
             lines.extend([
                 f'        intervals [{i}]:',
-                f'            xmin = {word.start}',
-                f'            xmax = {word.end}',
+                f'            xmin = {word.start_seconds()}',
+                f'            xmax = {word.end_seconds()}',
                 f'            text = "{word.word}"',
             ])
 
@@ -362,9 +379,9 @@ class AlignmentResult:
         """
         lines = []
         for word in self.words:
-            duration = word.end - word.start
+            duration = word.duration_seconds()
             conf_str = f" {word.score:.3f}" if word.score > 0 else ""
-            lines.append(f"{audio_id} 1 {word.start:.3f} {duration:.3f} {word.word}{conf_str}")
+            lines.append(f"{audio_id} 1 {word.start_seconds():.3f} {duration:.3f} {word.word}{conf_str}")
         return "\n".join(lines)
 
     def save_ctm(self, path: str, audio_id: str = "audio") -> str:
@@ -432,8 +449,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if not chunk:
                 continue
 
-            line_start = chunk[0].start
-            line_end = chunk[-1].end
+            line_start = chunk[0].start_seconds()
+            line_end = chunk[-1].end_seconds()
 
             # Build karaoke text with timing tags
             # {\k<duration in centiseconds>}word
@@ -441,9 +458,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             for j, word in enumerate(chunk):
                 # Duration in centiseconds (100ths of a second)
                 if j < len(chunk) - 1:
-                    duration_cs = int((chunk[j + 1].start - word.start) * 100)
+                    duration_cs = int((chunk[j + 1].start_seconds() - word.start_seconds()) * 100)
                 else:
-                    duration_cs = int((word.end - word.start) * 100)
+                    duration_cs = int(word.duration_seconds() * 100)
                 karaoke_parts.append(f"{{\\kf{duration_cs}}}{word.word}")
 
             text = " ".join(karaoke_parts)
@@ -488,18 +505,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         # Time statistics
         stats["time_range"] = {
-            "start": self.words[0].start,
-            "end": self.words[-1].end,
-            "duration": self.words[-1].end - self.words[0].start,
+            "start": self.words[0].start_seconds(),
+            "end": self.words[-1].end_seconds(),
+            "duration": self.words[-1].end_seconds() - self.words[0].start_seconds(),
         }
 
         if "audio_duration" in self.metadata:
             stats["audio_duration"] = self.metadata["audio_duration"]
-            aligned_duration = self.words[-1].end - self.words[0].start
+            aligned_duration = self.words[-1].end_seconds() - self.words[0].start_seconds()
             stats["aligned_time_percent"] = 100.0 * aligned_duration / self.metadata["audio_duration"]
 
         # Word duration statistics
-        durations = [w.duration for w in self.words]
+        durations = [w.duration_seconds() for w in self.words]
         stats["word_duration"] = {
             "mean": sum(durations) / len(durations),
             "min": min(durations),
@@ -520,7 +537,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Gap statistics (time between words)
         gaps = []
         for i in range(1, len(self.words)):
-            gap = self.words[i].start - self.words[i - 1].end
+            gap = self.words[i].start_seconds() - self.words[i - 1].end_seconds()
             if gap > 0:
                 gaps.append(gap)
         if gaps:
@@ -555,7 +572,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             print(f"Aligned time: {stats.get('aligned_time_percent', 0):.1f}%")
 
         wd = stats["word_duration"]
-        print(f"\nWord duration:")
+        print("\nWord duration:")
         print(f"  Mean: {wd['mean']*1000:.0f}ms")
         print(f"  Min: {wd['min']*1000:.0f}ms")
         print(f"  Max: {wd['max']*1000:.0f}ms")
@@ -563,14 +580,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         if "confidence" in stats:
             conf = stats["confidence"]
-            print(f"\nConfidence scores:")
+            print("\nConfidence scores:")
             print(f"  Mean: {conf['mean']:.3f}")
             print(f"  Min: {conf['min']:.3f}")
             print(f"  Max: {conf['max']:.3f}")
 
         if "gaps" in stats:
             g = stats["gaps"]
-            print(f"\nGaps between words:")
+            print("\nGaps between words:")
             print(f"  Count: {g['count']}")
             print(f"  Total: {g['total']*1000:.0f}ms")
             print(f"  Mean: {g['mean']*1000:.0f}ms")
@@ -589,7 +606,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if self.unaligned_regions:
             lines.append(f"  Unaligned regions: {len(self.unaligned_regions)}")
         if self.words:
-            lines.append(f"  Time range: {self.words[0].start:.2f}s - {self.words[-1].end:.2f}s")
+            lines.append(f"  Time range: {self.words[0].start_seconds():.2f}s - {self.words[-1].end_seconds():.2f}s")
         if "total_words" in self.metadata:
             coverage = 100.0 * len(self.words) / self.metadata["total_words"]
             lines.append(f"  Coverage: {coverage:.1f}%")

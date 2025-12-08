@@ -22,9 +22,9 @@ Main entry point:
     >>> # Align
     >>> result = align(waveform, text, model_backend=model)
 
-    >>> # Access results
+    >>> # Access results (call start_seconds()/end_seconds() for times)
     >>> for idx, word in result.word_alignments.items():
-    ...     print(f"{word.word}: {word.start_seconds:.2f}s")
+    ...     print(f"{word.word}: {word.start_seconds():.2f}s")
 
 Backends:
     - WFSTAligner: Fuzzy alignment for long audio with noisy transcripts

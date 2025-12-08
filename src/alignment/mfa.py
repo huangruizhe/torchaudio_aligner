@@ -292,9 +292,8 @@ class MFAAligner(AlignerBackend):
             if interval.mark and interval.mark.strip():
                 word_alignments[word_idx] = AlignedWord(
                     word=interval.mark.strip(),
-                    start_time=int(interval.minTime / frame_duration),
-                    end_time=int(interval.maxTime / frame_duration),
-                    phones=[],
+                    start_frame=int(interval.minTime / frame_duration),
+                    end_frame=int(interval.maxTime / frame_duration),
                 )
                 word_idx += 1
 
@@ -305,8 +304,8 @@ class MFAAligner(AlignerBackend):
                     phone_start = int(interval.minTime / frame_duration)
                     # Find which word this phone belongs to
                     for wid, word in word_alignments.items():
-                        if word.start_time <= phone_start < word.end_time:
-                            word.phones.append(AlignedToken(
+                        if word.start_frame <= phone_start < word.end_frame:
+                            word.chars.append(AlignedToken(
                                 token_id=interval.mark.strip(),
                                 timestamp=phone_start,
                                 score=1.0,
@@ -358,9 +357,8 @@ class MFAAligner(AlignerBackend):
                 if text and text.strip():
                     word_alignments[word_idx] = AlignedWord(
                         word=text.strip(),
-                        start_time=int(xmin / frame_duration) if xmin else 0,
-                        end_time=int(xmax / frame_duration) if xmax else 0,
-                        phones=[],
+                        start_frame=int(xmin / frame_duration) if xmin else 0,
+                        end_frame=int(xmax / frame_duration) if xmax else 0,
                     )
                     word_idx += 1
                 continue

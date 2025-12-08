@@ -12,7 +12,7 @@ import torch
 import logging
 
 # Import both the internal AlignedToken and the user-facing classes
-from alignment.base import AlignedToken, AlignedWord as AlignedWordSeconds, AlignedChar
+from alignment.base import AlignedToken, AlignedChar
 
 logger = logging.getLogger(__name__)
 
@@ -296,27 +296,9 @@ class AlignedToken:
     score: float = 0.0
 
 
-@dataclass
-class AlignedWordInternal:
-    """
-    Internal word-level alignment result (in FRAMES, not seconds).
-
-    NOTE: This is an INTERNAL class used during alignment processing.
-    The user-facing class is `AlignedWord` in alignment/base.py which
-    uses seconds instead of frames.
-
-    Attributes:
-        word: The word text (normalized form)
-        start_time: Start frame index
-        end_time: End frame index (or None)
-        phones: List of phone-level alignments
-        original: Original word form before normalization (if different)
-    """
-    word: str
-    start_time: int
-    end_time: Optional[int] = None
-    phones: List = field(default_factory=list)
-    original: Optional[str] = None
+# We now use AlignedWord directly from base.py with start_frame/end_frame.
+# Import it for use in this module.
+from alignment.base import AlignedWord
 
 
 # =============================================================================
@@ -594,124 +576,27 @@ def concat_alignments(
 # Final word alignment (following Tutorial.py get_final_word_alignment)
 # =============================================================================
 
-def _compute_word_end_times(
-    word_alignment: Dict[int, AlignedWordInternal],
-    text_splitted: List[str],
-    max_word_frames: int = 50,
-    default_frames_per_char: float = 2.5,
-    min_word_frames: int = 5,
-) -> None:
-    """
-    Compute end_time for each word using smart duration estimation.
-
-    Strategy:
-    1. Compute average frames per character from words with known durations
-    2. For words where next word is close, use next word's start_time
-    3. For words with gaps (or last word), estimate duration based on char count
-    4. Cap all durations at max_word_frames
-
-    Args:
-        word_alignment: Dict mapping word index to AlignedWordInternal (modified in-place)
-        text_splitted: List of words from original text
-        max_word_frames: Maximum duration for any word (~1s at 20ms/frame)
-        default_frames_per_char: Fallback if no stats available (~50ms/char)
-        min_word_frames: Minimum duration for any word (~100ms)
-    """
-    if not word_alignment:
-        return
-
-    sorted_indices = sorted(word_alignment.keys())
-
-    # Helper to get start time as float
-    def get_start(word):
-        if hasattr(word.start_time, 'item'):
-            return word.start_time.item()
-        return word.start_time
-
-    # Step 1: Compute average frames per character from consecutive word pairs
-    char_durations = []
-    for i in range(len(sorted_indices) - 1):
-        idx = sorted_indices[i]
-        next_idx = sorted_indices[i + 1]
-        current_word = word_alignment[idx]
-        next_word = word_alignment[next_idx]
-
-        if current_word.word is None:
-            continue
-
-        current_start = get_start(current_word)
-        next_start = get_start(next_word)
-        duration = next_start - current_start
-
-        # Only use reasonable durations for statistics
-        if 0 < duration <= max_word_frames:
-            num_chars = len(current_word.word)
-            if num_chars > 0:
-                char_durations.append(duration / num_chars)
-
-    # Compute average frames per character
-    if char_durations:
-        avg_frames_per_char = sum(char_durations) / len(char_durations)
-    else:
-        avg_frames_per_char = default_frames_per_char
-
-    logger.debug(f"Estimated {avg_frames_per_char:.2f} frames/char from {len(char_durations)} samples")
-
-    # Step 2: Set end_time for each word
-    for i, idx in enumerate(sorted_indices):
-        current_word = word_alignment[idx]
-        current_start = get_start(current_word)
-
-        if i + 1 < len(sorted_indices):
-            next_idx = sorted_indices[i + 1]
-            next_word = word_alignment[next_idx]
-            next_start = get_start(next_word)
-            gap = next_start - current_start
-
-            if gap <= max_word_frames:
-                # Next word is close enough, use its start
-                word_alignment[idx].end_time = next_word.start_time
-            else:
-                # Large gap - estimate duration from char count
-                if current_word.word is not None:
-                    estimated = int(len(current_word.word) * avg_frames_per_char)
-                    estimated = max(min_word_frames, min(estimated, max_word_frames))
-                else:
-                    estimated = min_word_frames
-                word_alignment[idx].end_time = current_start + estimated
-        else:
-            # Last word - estimate duration from char count
-            if current_word.word is not None:
-                estimated = int(len(current_word.word) * avg_frames_per_char)
-                estimated = max(min_word_frames, min(estimated, max_word_frames))
-            else:
-                estimated = min_word_frames
-            word_alignment[idx].end_time = current_start + estimated
-
-
 def get_final_word_alignment(
     alignment_results: List[AlignedToken],
     text: str,
+    original_text_words: List[str],
     tokenizer,
-) -> Dict[int, AlignedWordInternal]:
+) -> Dict[int, AlignedWord]:
     """
     Convert token-level alignment to word-level alignment (follows Tutorial.py pattern).
 
-    Groups consecutive tokens by word index and creates AlignedWordInternal objects
-    with start times (in FRAMES) and phone-level details.
+    Groups consecutive tokens by word index and creates AlignedWord objects
+    with start_frame/end_frame (in FRAMES). Call start_seconds()/end_seconds() for seconds.
 
     Args:
         alignment_results: List of AlignedToken from concat_alignments
-        text: Original text (space-separated words)
+        text: Normalized text (space-separated words)
+        original_text_words: Original (non-normalized) words for display
         tokenizer: Tokenizer with id2token mapping (or similar interface)
 
     Returns:
-        Dict mapping word index (int) to AlignedWordInternal object.
-        Keys are sorted in ascending order. Times are in FRAMES, not seconds.
-
-    Note:
-        End times are not computed here - they should be derived from
-        the start time of the next word or added separately.
+        Dict mapping word index (int) to AlignedWord object.
+        Keys are sorted in ascending order. Times are in FRAMES.
     """
     if not alignment_results:
         return {}
@@ -719,175 +604,95 @@ def get_final_word_alignment(
     text_splitted = text.split()
     num_words = len(text_splitted)
 
-    word_alignment = {}
-    aligned_word = None
-    word_idx = None
+    # First pass: collect word start frames and tokens
+    word_data = {}  # word_idx -> {"start_frame": int, "tokens": [(char, frame, score), ...]}
 
+    current_word_idx = None
     for aligned_token in alignment_results:
         if "wid" in aligned_token.attr:
-            # Save previous word before starting new one
-            if aligned_word is not None and word_idx is not None:
-                word_alignment[word_idx] = aligned_word
+            current_word_idx = aligned_token.attr['wid']
+            if current_word_idx < num_words and current_word_idx not in word_data:
+                word_data[current_word_idx] = {
+                    "start_frame": aligned_token.timestamp,
+                    "tokens": [],
+                }
 
-            word_idx = aligned_token.attr['wid']
-
-            # Handle end-of-text placeholder (word_idx == num_words)
-            if word_idx >= num_words:
-                # This is the end marker, not a real word
-                word = None
-            else:
-                word = text_splitted[word_idx]
-
-            aligned_word = AlignedWordInternal(
-                word=word,
-                start_time=aligned_token.timestamp,
-                end_time=None,
-                phones=[],
-            )
-
-        # Add phone-level alignment if token info available
-        if 'tk' not in aligned_token.attr:
-            continue
-
-        if aligned_word is not None:
-            # Get token symbol from tokenizer if available
-            token_symbol = aligned_token.attr['tk']
-            if hasattr(tokenizer, 'id2token') and token_symbol in tokenizer.id2token:
-                token_symbol = tokenizer.id2token[token_symbol]
-
-            aligned_word.phones.append(
-                AlignedToken(
-                    token_id=token_symbol,
-                    timestamp=aligned_token.timestamp,
-                    attr={},  # Use empty dict instead of None for consistency
-                    score=aligned_token.score,
+        # Add token to current word (skip blanks)
+        if current_word_idx is not None and current_word_idx in word_data:
+            if aligned_token.token_id != tokenizer.blk_id and "tk" in aligned_token.attr:
+                char = aligned_token.attr["tk"]
+                if hasattr(tokenizer, 'id2token') and char in tokenizer.id2token:
+                    char = tokenizer.id2token[char]
+                word_data[current_word_idx]["tokens"].append(
+                    (char, aligned_token.timestamp, aligned_token.score)
                 )
-            )
 
-    # Save last word
-    if aligned_word is not None and word_idx is not None:
-        word_alignment[word_idx] = aligned_word
+    if not word_data:
+        return {}
 
-    # Sort by word index for consistent output
-    word_alignment = {k: word_alignment[k] for k in sorted(word_alignment.keys())}
+    # Second pass: compute end_frames
+    sorted_indices = sorted(word_data.keys())
+    max_word_frames = 50
+    min_word_frames = 5
+    default_frames_per_char = 2.5
 
-    # Compute end_time for each word using smart duration estimation
-    _compute_word_end_times(word_alignment, text_splitted)
+    # Estimate average frames per character
+    char_durations = []
+    for i in range(len(sorted_indices) - 1):
+        idx = sorted_indices[i]
+        next_idx = sorted_indices[i + 1]
+        duration = word_data[next_idx]["start_frame"] - word_data[idx]["start_frame"]
+        word_text = text_splitted[idx]
+        if word_text and 0 < duration <= max_word_frames:
+            char_durations.append(duration / len(word_text))
 
-    logger.debug(f"Built word alignment: {len(word_alignment)} words")
+    avg_frames_per_char = sum(char_durations) / len(char_durations) if char_durations else default_frames_per_char
 
-    return word_alignment
+    # Set end_frame for each word
+    for i, idx in enumerate(sorted_indices):
+        start_frame = word_data[idx]["start_frame"]
+        word_text = text_splitted[idx]
 
-
-def get_final_word_alignment_seconds(
-    alignment_results: List[AlignedToken],
-    text: str,
-    original_text_words: List[str],
-    tokenizer,
-    frame_duration: float = 0.02,
-) -> Tuple[List[AlignedWordSeconds], List[AlignedChar]]:
-    """
-    Convert token-level alignment to word-level alignment with times in SECONDS.
-
-    This is the user-facing function that returns a clean list of AlignedWord
-    objects with all times converted to seconds, plus character-level alignments.
-
-    Args:
-        alignment_results: List of AlignedToken from concat_alignments
-        text: Normalized text (space-separated words)
-        original_text_words: Original (non-normalized) words
-        tokenizer: Tokenizer with id2token mapping
-        frame_duration: Duration per frame in seconds (default 0.02 = 20ms)
-
-    Returns:
-        Tuple of (words, chars):
-        - words: List of AlignedWord objects sorted by start time
-        - chars: List of AlignedChar objects sorted by start time
-        All times are in seconds, ready for user consumption.
-    """
-    # First, get the frame-based alignment
-    word_alignment_frames = get_final_word_alignment(
-        alignment_results,
-        text,
-        tokenizer,
-    )
-
-    if not word_alignment_frames:
-        return [], []
-
-    # Build char-level alignments from alignment_results
-    # Group tokens by word index
-    word_tokens = {}  # word_idx -> list of (token, timestamp, score)
-    for token in alignment_results:
-        if token.token_id == tokenizer.blk_id:
-            continue
-        if "wid" in token.attr:
-            wid = token.attr["wid"]
-            if wid not in word_tokens:
-                word_tokens[wid] = []
-            char = token.attr.get("tk", str(token.token_id))
-            word_tokens[wid].append((char, token.timestamp, token.score))
-
-    # Convert to seconds-based AlignedWord objects with chars
-    words = []
-    all_chars = []
-    text_splitted = text.split()
-
-    for idx, aligned_word_internal in sorted(word_alignment_frames.items()):
-        # Skip None words (end-of-text markers)
-        if aligned_word_internal.word is None:
-            continue
-
-        # Convert frames to seconds
-        start_sec = aligned_word_internal.start_time * frame_duration
-        if aligned_word_internal.end_time is not None:
-            end_sec = aligned_word_internal.end_time * frame_duration
+        if i + 1 < len(sorted_indices):
+            next_start = word_data[sorted_indices[i + 1]]["start_frame"]
+            gap = next_start - start_frame
+            if gap <= max_word_frames:
+                word_data[idx]["end_frame"] = next_start
+            else:
+                estimated = int(len(word_text) * avg_frames_per_char) if word_text else min_word_frames
+                estimated = max(min_word_frames, min(estimated, max_word_frames))
+                word_data[idx]["end_frame"] = start_frame + estimated
         else:
-            end_sec = start_sec + 0.5  # Fallback
+            estimated = int(len(word_text) * avg_frames_per_char) if word_text else min_word_frames
+            estimated = max(min_word_frames, min(estimated, max_word_frames))
+            word_data[idx]["end_frame"] = start_frame + estimated
 
-        # Get original word form
-        # Always store original if: word is "*" (unknown), or original differs from normalized
+    # Third pass: build AlignedWord objects
+    word_alignment = {}
+    for idx in sorted_indices:
+        data = word_data[idx]
+        word_text = text_splitted[idx]
+
+        # Get original word form if different
         original = None
         if idx < len(original_text_words):
             orig_word = original_text_words[idx]
-            if aligned_word_internal.word == "*" or orig_word.lower() != aligned_word_internal.word.lower():
+            if word_text == "*" or orig_word.lower() != word_text.lower():
                 original = orig_word
 
-        # Build char-level alignments for this word
-        word_chars = []
-        word_scores = []
-        if idx in word_tokens:
-            tokens = word_tokens[idx]
-            for i, (char, timestamp, score) in enumerate(tokens):
-                char_start = timestamp * frame_duration
-                # Estimate char end from next char or word end
-                if i + 1 < len(tokens):
-                    char_end = tokens[i + 1][1] * frame_duration
-                else:
-                    char_end = end_sec
+        # Compute score from tokens
+        tokens = data["tokens"]
+        word_score = sum(t[2] for t in tokens) / len(tokens) if tokens else 0.0
 
-                aligned_char = AlignedChar(
-                    char=char,
-                    start=char_start,
-                    end=char_end,
-                    score=score,
-                    word_index=idx,
-                )
-                word_chars.append(aligned_char)
-                all_chars.append(aligned_char)
-                word_scores.append(score)
-
-        # Compute word score as average of char scores
-        word_score = sum(word_scores) / len(word_scores) if word_scores else 0.0
-
-        words.append(AlignedWordSeconds(
-            word=aligned_word_internal.word,
-            start=start_sec,
-            end=end_sec,
+        word_alignment[idx] = AlignedWord(
+            word=word_text,
+            start_frame=data["start_frame"],
+            end_frame=data["end_frame"],
             score=word_score,
             original=original,
             index=idx,
-            chars=word_chars,
-        ))
+            chars=[],  # Could build AlignedChar here if needed
+        )
 
-    return words, all_chars
+    logger.debug(f"Built word alignment: {len(word_alignment)} words")
+    return word_alignment

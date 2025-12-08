@@ -44,7 +44,7 @@ from .k2_utils import (
     get_best_paths,
     get_texts_with_timestamp,
     concat_alignments,
-    get_final_word_alignment_seconds,
+    get_final_word_alignment,
 )
 from .lis_utils import (
     compute_lis,
@@ -423,16 +423,12 @@ class WFSTAligner(AlignerBackend):
         text_normalized = self._tokenizer.text_normalize(text)
         original_text_words = text.split()
 
-        words, chars = get_final_word_alignment_seconds(
+        word_alignment = get_final_word_alignment(
             resolved_results,
             text_normalized,
             original_text_words,
             self._tokenizer,
-            frame_duration=config.frame_duration,
         )
-
-        # Convert list to dict for AlignmentResult compatibility
-        word_alignment = {word.index: word for word in words}
         logger.info(f"Aligned {len(word_alignment)} words")
 
         return AlignmentResult(

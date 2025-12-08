@@ -11,9 +11,9 @@ Usage:
         text="path/to/transcript.pdf",
     )
 
-    # Iterate over aligned words (times in seconds)
+    # Iterate over aligned words (times in frames, call methods for seconds)
     for word in result:
-        print(f"{word.word}: {word.start:.2f}s - {word.end:.2f}s")
+        print(f"{word.word}: {word.start_seconds():.2f}s - {word.end_seconds():.2f}s")
 
     # Export to various formats
     result.save_audacity_labels("labels.txt")
@@ -88,12 +88,12 @@ def align_long_audio(
         verbose: Print progress (default True)
 
     Returns:
-        AlignmentResult with aligned words (times in seconds)
+        AlignmentResult with aligned words (times in frames, use start_seconds()/end_seconds())
 
     Example:
         >>> result = align_long_audio("audio.mp3", "transcript.pdf")
         >>> for word in result:
-        ...     print(f"{word.word}: {word.start:.2f}s - {word.end:.2f}s")
+        ...     print(f"{word.word}: {word.start_seconds():.2f}s - {word.end_seconds():.2f}s")
         >>> result.save_audacity_labels("labels.txt")
     """
     import torchaudio
@@ -332,25 +332,26 @@ def align_long_audio(
         logger.info(f"  Unaligned regions: {len(unaligned_indices) if unaligned_indices else 0}")
 
     # =========================================================================
-    # Step 7: Build word-level alignment (convert to seconds here!)
+    # Step 7: Build word-level alignment (frames-based, call start_seconds()/end_seconds() for seconds)
     # =========================================================================
     if verbose:
         logger.info("Step 7: Building word alignment...")
 
-    from alignment.wfst.k2_utils import get_final_word_alignment_seconds
+    from alignment.wfst.k2_utils import get_final_word_alignment
 
-    words, chars = get_final_word_alignment_seconds(
+    word_alignment_dict = get_final_word_alignment(
         resolved_tokens,
         text_normalized,
         original_text_words,
         tokenizer,
-        frame_duration=frame_duration,
     )
+
+    # Convert dict to sorted list
+    words = [word_alignment_dict[idx] for idx in sorted(word_alignment_dict.keys())]
 
     if verbose:
         coverage = 100.0 * len(words) / len(text_words) if text_words else 0
         logger.info(f"  Aligned: {len(words)} / {len(text_words)} words ({coverage:.1f}%)")
-        logger.info(f"  Characters: {len(chars)}")
 
     # =========================================================================
     # Build result
@@ -359,14 +360,13 @@ def align_long_audio(
         "audio_duration": segmentation.original_duration_seconds,
         "num_segments": segmentation.num_segments,
         "total_words": len(text_words),
-        "total_chars": len(chars),
         "model": model_name,
         "language": language,
     }
 
     result = AlignmentResult(
         words=words,
-        chars=chars,
+        chars=[],  # Character-level not built in this path
         unaligned_regions=unaligned_indices if unaligned_indices else [],
         metadata=metadata,
     )

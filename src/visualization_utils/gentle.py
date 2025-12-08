@@ -59,18 +59,9 @@ def get_gentle_visualization(
 
         if i in word_alignment:
             aligned = word_alignment[i]
-            if hasattr(aligned.start_time, 'item'):
-                start = aligned.start_time.item() * frame_duration
-            else:
-                start = aligned.start_time * frame_duration
-
-            if aligned.end_time is not None:
-                if hasattr(aligned.end_time, 'item'):
-                    end = aligned.end_time.item() * frame_duration
-                else:
-                    end = aligned.end_time * frame_duration
-            else:
-                end = start + 0.3  # Default duration
+            # AlignedWord now has start_seconds()/end_seconds() methods
+            start = aligned.start_seconds(frame_duration)
+            end = aligned.end_seconds(frame_duration)
 
             word_info["aligned"] = True
             word_info["start"] = start
@@ -293,8 +284,8 @@ def get_gentle_visualization_from_words(
             "word": display_text,
             "index": word.index,
             "aligned": True,  # All words in the list are aligned
-            "start": word.start,
-            "end": word.end,
+            "start": word.start_seconds(),
+            "end": word.end_seconds(),
         }
         words_data.append(word_info)
 

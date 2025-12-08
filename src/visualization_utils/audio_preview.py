@@ -24,16 +24,16 @@ import random
 
 def preview_word_seconds(
     waveform,
-    word,  # AlignedWord with start/end in seconds
+    word,  # AlignedWord with start_frame/end_frame
     sample_rate: int = 16000,
     padding: float = 0.0,  # padding in seconds
 ):
     """
-    Preview audio for an aligned word (times in seconds).
+    Preview audio for an aligned word.
 
     Args:
         waveform: Audio waveform tensor (1D or 2D)
-        word: AlignedWord object with start/end in seconds
+        word: AlignedWord object (call start_seconds()/end_seconds() for times)
         sample_rate: Audio sample rate
         padding: Extra seconds to include before/after
 
@@ -47,8 +47,8 @@ def preview_word_seconds(
     from IPython.display import Audio
     import torch
 
-    start_sec = max(0, word.start - padding)
-    end_sec = word.end + padding
+    start_sec = max(0, word.start_seconds() - padding)
+    end_sec = word.end_seconds() + padding
 
     start_sample = int(start_sec * sample_rate)
     end_sample = int(end_sec * sample_rate)
@@ -66,7 +66,7 @@ def preview_word_seconds(
         segment_np = segment
 
     display_word = word.original if word.original else word.word
-    print(f"'{display_word}': {word.start:.2f}s - {word.end:.2f}s")
+    print(f"'{display_word}': {word.start_seconds():.2f}s - {word.end_seconds():.2f}s")
 
     return Audio(segment_np, rate=sample_rate)
 
@@ -99,8 +99,8 @@ def preview_segment_seconds(
         print("No words to preview")
         return None, ""
 
-    start_sec = max(0, words[0].start - padding)
-    end_sec = words[-1].end + padding
+    start_sec = max(0, words[0].start_seconds() - padding)
+    end_sec = words[-1].end_seconds() + padding
 
     start_sample = int(start_sec * sample_rate)
     end_sample = int(end_sec * sample_rate)
@@ -119,7 +119,7 @@ def preview_segment_seconds(
 
     # Build text
     text = " ".join(w.original if w.original else w.word for w in words)
-    print(f"Segment ({words[0].start:.2f}s - {words[-1].end:.2f}s):")
+    print(f"Segment ({words[0].start_seconds():.2f}s - {words[-1].end_seconds():.2f}s):")
     print(f"  {text[:100]}{'...' if len(text) > 100 else ''}")
 
     return Audio(segment_np, rate=sample_rate), text
@@ -193,19 +193,9 @@ def preview_word(
 
     word = word_alignment[word_idx]
 
-    # Get start/end frames
-    if hasattr(word.start_time, 'item'):
-        start_frame = word.start_time.item()
-    else:
-        start_frame = word.start_time
-
-    if word.end_time is not None:
-        if hasattr(word.end_time, 'item'):
-            end_frame = word.end_time.item()
-        else:
-            end_frame = word.end_time
-    else:
-        end_frame = start_frame + 25  # Default ~0.5s
+    # Get start/end frames - AlignedWord now has start_frame/end_frame attributes
+    start_frame = word.start_frame
+    end_frame = word.end_frame
 
     # Add padding
     start_frame = max(0, int(start_frame) - padding_frames)
@@ -261,27 +251,12 @@ def preview_segment(
 
     segment_words = sorted_items[start_idx:end_idx]
 
-    # Get time range
+    # Get time range - AlignedWord now has start_frame/end_frame attributes
     first_word = segment_words[0][1]
     last_word = segment_words[-1][1]
 
-    if hasattr(first_word.start_time, 'item'):
-        start_frame = first_word.start_time.item()
-    else:
-        start_frame = first_word.start_time
-
-    if last_word.end_time is not None:
-        if hasattr(last_word.end_time, 'item'):
-            end_frame = last_word.end_time.item()
-        else:
-            end_frame = last_word.end_time
-    else:
-        # Fallback: use last word's start_time + default duration
-        if hasattr(last_word.start_time, 'item'):
-            last_start = last_word.start_time.item()
-        else:
-            last_start = last_word.start_time
-        end_frame = last_start + 25  # Default ~0.5s for last word
+    start_frame = first_word.start_frame
+    end_frame = last_word.end_frame
 
     # Add padding
     start_frame = max(0, int(start_frame) - padding_frames)
