@@ -171,7 +171,12 @@ def preview_segment(
         else:
             end_frame = last_word.end_time
     else:
-        end_frame = start_frame + 50  # Default
+        # Fallback: use last word's start_time + default duration
+        if hasattr(last_word.start_time, 'item'):
+            last_start = last_word.start_time.item()
+        else:
+            last_start = last_word.start_time
+        end_frame = last_start + 25  # Default ~0.5s for last word
 
     # Add padding
     start_frame = max(0, int(start_frame) - padding_frames)

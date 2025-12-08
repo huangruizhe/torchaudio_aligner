@@ -667,6 +667,14 @@ def get_final_word_alignment(
     # Sort by word index for consistent output
     word_alignment = {k: word_alignment[k] for k in sorted(word_alignment.keys())}
 
+    # Compute end_time for each word from the next word's start_time
+    sorted_indices = sorted(word_alignment.keys())
+    for i, idx in enumerate(sorted_indices):
+        if i + 1 < len(sorted_indices):
+            next_idx = sorted_indices[i + 1]
+            word_alignment[idx].end_time = word_alignment[next_idx].start_time
+        # Last word: end_time remains None (or could estimate from last phone)
+
     logger.debug(f"Built word alignment: {len(word_alignment)} words")
 
     return word_alignment
