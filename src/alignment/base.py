@@ -681,8 +681,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def create_interactive_demo(
         self,
-        audio_file: str,
         output_dir: str,
+        audio_file: str = None,
         title: str = None,
     ) -> str:
         """
@@ -698,8 +698,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         - Modern UI with statistics
 
         Args:
-            audio_file: Path to the audio file
             output_dir: Directory to save demo files
+            audio_file: Path to the audio file (optional, uses metadata if not provided)
             title: Optional title for the demo page
 
         Returns:
@@ -707,9 +707,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         Example:
             >>> result = align_long_audio("audio.mp3", "text.txt", language="eng")
-            >>> result.create_interactive_demo("audio.mp3", "demo_output/")
+            >>> result.create_interactive_demo("demo_output/")
             >>> # Open demo_output/index.html in browser
         """
+        # Get audio file from metadata if not provided
+        if audio_file is None:
+            audio_file = self.metadata.get("audio_file")
+        if not audio_file:
+            raise ValueError(
+                "audio_file not found. Either pass audio_file argument or "
+                "use align_long_audio() which stores it in metadata."
+            )
+
         # Build title if not provided
         if title is None:
             title = "TorchAudio Aligner - Interactive Demo"
