@@ -208,6 +208,7 @@ def install_other_deps(
             "pypdf",
             "requests",
             "beautifulsoup4",
+            "torchcodec"
             "git+https://github.com/huangruizhe/lis.git",
         ]
 
