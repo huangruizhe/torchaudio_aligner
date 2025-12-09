@@ -658,21 +658,49 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     # Summary
     # -------------------------------------------------------------------------
 
-    def summary(self) -> str:
-        """Get a summary string."""
+    def summary(self, show_words: bool = True, num_words: int = 5) -> str:
+        """
+        Get a summary string with alignment statistics and sample words.
+
+        Args:
+            show_words: If True, show first/last words with timestamps
+            num_words: Number of words to show at start and end (default 5)
+
+        Returns:
+            Formatted summary string
+        """
         lines = [
-            f"Alignment Result:",
-            f"  Words aligned: {len(self.words)}",
+            "=" * 60,
+            "Alignment Result",
+            "=" * 60,
+            f"Words aligned: {len(self.words)}",
         ]
         if self.unaligned_regions:
-            lines.append(f"  Unaligned regions: {len(self.unaligned_regions)}")
+            lines.append(f"Unaligned regions: {len(self.unaligned_regions)}")
         if self.words:
-            lines.append(f"  Time range: {self.words[0].start_seconds():.2f}s - {self.words[-1].end_seconds():.2f}s")
+            duration = self.words[-1].end_seconds() - self.words[0].start_seconds()
+            lines.append(f"Time range: {self.words[0].start_seconds():.2f}s - {self.words[-1].end_seconds():.2f}s ({duration:.1f}s)")
         if "total_words" in self.metadata:
             coverage = 100.0 * len(self.words) / self.metadata["total_words"]
-            lines.append(f"  Coverage: {coverage:.1f}%")
+            lines.append(f"Coverage: {coverage:.1f}% ({len(self.words)}/{self.metadata['total_words']} words)")
         if "audio_duration" in self.metadata:
-            lines.append(f"  Audio duration: {self.metadata['audio_duration']:.1f}s")
+            lines.append(f"Audio duration: {self.metadata['audio_duration']:.1f}s")
+
+        # Show first/last words with timestamps
+        if show_words and self.words:
+            n = min(num_words, len(self.words))
+            lines.append("")
+            lines.append(f"First {n} words:")
+            for w in self.words[:n]:
+                lines.append(f"  '{w.word}': {w.start_seconds():.2f}s - {w.end_seconds():.2f}s")
+
+            if len(self.words) > n * 2:
+                lines.append("")
+                lines.append(f"Last {n} words:")
+                for w in self.words[-n:]:
+                    lines.append(f"  '{w.word}': {w.start_seconds():.2f}s - {w.end_seconds():.2f}s")
+
+        lines.append("=" * 60)
         return "\n".join(lines)
 
     # -------------------------------------------------------------------------

@@ -121,6 +121,7 @@ def align_long_audio(
         logger.info(f"Text: {text_name}")
         logger.info(f"Language: {language}")
         logger.info(f"Device: {device}")
+        logger.info("-" * 60)
 
     # =========================================================================
     # Step 1: Load and preprocess audio
@@ -418,10 +419,6 @@ def align_long_audio(
     # Convert dict to sorted list
     words = [word_alignment_dict[idx] for idx in sorted(word_alignment_dict.keys())]
 
-    if verbose:
-        coverage = 100.0 * len(words) / len(text_words) if text_words else 0
-        logger.info(f"  Aligned: {len(words)} / {len(text_words)} words ({coverage:.1f}%)")
-
     # =========================================================================
     # Build result
     # =========================================================================
@@ -445,8 +442,9 @@ def align_long_audio(
     )
 
     if verbose:
+        # Print the detailed summary with first/last words
         logger.info("Alignment complete!")
-        logger.info(f"  {len(result)} words aligned")
+        print(result.summary())
 
     return result
 
