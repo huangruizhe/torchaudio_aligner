@@ -117,10 +117,15 @@ def play_segment(result, start_idx: int, num_words: int = 20, audio_file: str = 
     audio = AudioSegment.from_file(audio_file).set_channels(1)
     segment = audio[start_sec * 1000:end_sec * 1000]
 
-    # Display info - use original form if available, show full text
-    text = " ".join(w.original if w.original else w.word for w in words)
+    # Display info - show both original and normalized/romanized forms
+    original_text = " ".join(w.original if w.original else w.word for w in words)
+    normalized_text = " ".join(w.word for w in words)
+
     print(f"Words {start_idx}-{end_idx-1} ({start_sec:.2f}s - {end_sec:.2f}s):")
-    print(f"  {text}")
+    print(f"  {original_text}")
+    # Only show normalized row if it differs from original (e.g., for non-Latin scripts)
+    if normalized_text != original_text:
+        print(f"  {normalized_text}")
 
     return Audio(segment.get_array_of_samples(), rate=segment.frame_rate)
 
