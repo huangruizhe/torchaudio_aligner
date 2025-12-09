@@ -210,6 +210,7 @@ def install_other_deps(
             "requests",
             "beautifulsoup4",
             "torchcodec",
+            "uroman-python",
             "git+https://github.com/huangruizhe/lis.git",
         ]
 
