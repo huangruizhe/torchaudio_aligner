@@ -126,10 +126,31 @@ def play_segment(result, start_idx: int, num_words: int = 20, audio_file: str = 
     show_normalized = original_words != normalized_words
 
     if show_normalized:
-        # Calculate column widths to align words vertically
-        col_widths = [max(len(o), len(n)) for o, n in zip(original_words, normalized_words)]
-        original_aligned = " ".join(o.ljust(w) for o, w in zip(original_words, col_widths))
-        normalized_aligned = " ".join(n.ljust(w) for n, w in zip(normalized_words, col_widths))
+        # Use wcwidth for proper Unicode display width (CJK chars are 2 columns wide)
+        try:
+            import wcwidth
+
+            def display_width(s):
+                """Get display width of string (CJK chars = 2, Latin = 1)."""
+                return sum(max(0, wcwidth.wcwidth(c)) for c in s)
+
+            def pad_to_width(s, target_width):
+                """Pad string to target display width."""
+                current_width = display_width(s)
+                return s + " " * (target_width - current_width)
+
+        except ImportError:
+            # Fallback to len() if wcwidth not installed
+            def display_width(s):
+                return len(s)
+
+            def pad_to_width(s, target_width):
+                return s.ljust(target_width)
+
+        # Calculate column widths based on display width
+        col_widths = [max(display_width(o), display_width(n)) for o, n in zip(original_words, normalized_words)]
+        original_aligned = " ".join(pad_to_width(o, w) for o, w in zip(original_words, col_widths))
+        normalized_aligned = " ".join(pad_to_width(n, w) for n, w in zip(normalized_words, col_widths))
 
         print(f"Words {start_idx}-{end_idx-1} ({start_sec:.2f}s - {end_sec:.2f}s):")
         print(f"  {original_aligned}")

@@ -211,6 +211,7 @@ def install_other_deps(
             "beautifulsoup4",
             "torchcodec",
             "uroman-python",
+            "wcwidth",
             "git+https://github.com/huangruizhe/lis.git",
         ]
 
