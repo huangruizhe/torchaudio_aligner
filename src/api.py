@@ -167,8 +167,14 @@ def align_long_audio(
                 sample_rate = audio_seg.frame_rate
             except Exception as e:
                 raise RuntimeError(
-                    f"Failed to load audio with all backends. "
-                    f"Try installing: pip install soundfile pydub, and apt-get install ffmpeg libsndfile1"
+                    f"Failed to load audio '{audio_path}' with all backends.\n\n"
+                    f"Please install audio decoding dependencies:\n"
+                    f"  # For Colab/Linux:\n"
+                    f"  !apt-get install -y ffmpeg libsndfile1\n"
+                    f"  !pip install soundfile pydub\n\n"
+                    f"  # For Mac:\n"
+                    f"  brew install ffmpeg libsndfile\n"
+                    f"  pip install soundfile pydub\n"
                 ) from e
 
         if verbose:
