@@ -794,6 +794,183 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             title=title,
         )
 
+    def display_html(
+        self,
+        output_path: str = None,
+        audio_file: str = None,
+        start_idx: int = 0,
+        end_idx: int = None,
+        title: str = None,
+    ):
+        """
+        Display interactive HTML visualization in Jupyter/Colab with embedded audio.
+
+        This embeds the audio as base64 so it works in Colab without file path issues.
+
+        Args:
+            output_path: Optional path to save the HTML file
+            audio_file: Path to audio file (uses metadata if not provided)
+            start_idx: Start word index to display
+            end_idx: End word index to display (None = all)
+            title: Optional title for the visualization
+
+        Returns:
+            IPython.display.HTML object for display in notebooks
+
+        Example:
+            >>> result = align_long_audio("audio.mp3", "text.txt", language="eng")
+            >>> result.display_html()  # Display in notebook
+            >>> result.display_html(start_idx=100, end_idx=200)  # Display subset
+        """
+        import base64
+        from IPython.display import HTML
+
+        # Get audio file from metadata if not provided
+        if audio_file is None:
+            audio_file = self.metadata.get("audio_file")
+        if not audio_file:
+            raise ValueError(
+                "audio_file not found. Either pass audio_file argument or "
+                "use align_long_audio() which stores it in metadata."
+            )
+
+        # Build title if not provided
+        if title is None:
+            title = "TorchAudio Aligner - Alignment Visualization"
+            if "language" in self.metadata:
+                title = f"{title} ({self.metadata['language']})"
+
+        # Get words in range
+        if end_idx is None:
+            end_idx = len(self.words)
+        words_subset = [w for w in self.words if start_idx <= w.index < end_idx]
+
+        # Build word data
+        words_data = []
+        for w in words_subset:
+            display_text = w.original if w.original else w.word
+            words_data.append({
+                "word": display_text,
+                "index": w.index,
+                "start": w.start_seconds(),
+                "end": w.end_seconds(),
+            })
+
+        # Read and base64 encode audio
+        with open(audio_file, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode("ascii")
+
+        # Detect audio type
+        audio_ext = str(audio_file).rsplit(".", 1)[-1].lower()
+        mime_types = {"mp3": "audio/mpeg", "wav": "audio/wav", "ogg": "audio/ogg", "m4a": "audio/mp4"}
+        mime_type = mime_types.get(audio_ext, "audio/mpeg")
+        audio_data_url = f"data:{mime_type};base64,{audio_b64}"
+
+        # Generate word spans
+        word_spans = []
+        for w in words_data:
+            span = f'<span class="word" data-start="{w["start"]}" data-end="{w["end"]}">{w["word"]}</span>'
+            word_spans.append(span)
+        words_html = " ".join(word_spans)
+
+        # Build HTML with embedded audio
+        html = f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px;">{title}</h2>
+
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                <strong>Words:</strong> {len(words_data)} |
+                <strong>Time:</strong> {words_data[0]['start']:.2f}s - {words_data[-1]['end']:.2f}s
+            </div>
+
+            <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <audio id="audio_{id(self)}" controls style="width: 100%;">
+                    <source src="{audio_data_url}" type="{mime_type}">
+                </audio>
+            </div>
+
+            <div style="background: white; padding: 20px; border-radius: 8px; line-height: 2.2; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                {words_html}
+            </div>
+
+            <p style="font-size: 12px; color: #888; margin-top: 10px;">Click on any word to play that segment.</p>
+        </div>
+
+        <style>
+            .word {{
+                display: inline;
+                cursor: pointer;
+                padding: 3px 6px;
+                margin: 2px;
+                border-radius: 4px;
+                background: #e8f5e9;
+                color: #2e7d32;
+                transition: all 0.2s;
+            }}
+            .word:hover {{
+                background: #c8e6c9;
+            }}
+            .word.playing {{
+                background: #4CAF50;
+                color: white;
+            }}
+        </style>
+
+        <script>
+            (function() {{
+                const audio = document.getElementById('audio_{id(self)}');
+                const words = document.querySelectorAll('.word');
+
+                words.forEach(word => {{
+                    word.addEventListener('click', () => {{
+                        const start = parseFloat(word.dataset.start);
+                        const end = parseFloat(word.dataset.end);
+
+                        if (audio && !isNaN(start)) {{
+                            audio.currentTime = start;
+                            audio.play();
+
+                            words.forEach(w => w.classList.remove('playing'));
+                            word.classList.add('playing');
+
+                            const duration = (end - start) * 1000;
+                            setTimeout(() => {{
+                                if (audio.currentTime >= end - 0.1) {{
+                                    audio.pause();
+                                }}
+                                word.classList.remove('playing');
+                            }}, duration + 100);
+                        }}
+                    }});
+                }});
+
+                if (audio) {{
+                    audio.addEventListener('timeupdate', () => {{
+                        const currentTime = audio.currentTime;
+                        words.forEach(word => {{
+                            const start = parseFloat(word.dataset.start);
+                            const end = parseFloat(word.dataset.end);
+                            if (currentTime >= start && currentTime < end) {{
+                                word.classList.add('playing');
+                            }} else {{
+                                word.classList.remove('playing');
+                            }}
+                        }});
+                    }});
+                }}
+            }})();
+        </script>
+        """
+
+        # Optionally save to file
+        if output_path:
+            full_html = f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>{title}</title></head><body>{html}</body></html>"
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(full_html)
+            print(f"Saved to: {output_path}")
+
+        return HTML(html)
+
     def __repr__(self):
         return f"AlignmentResult({len(self.words)} words)"
 
