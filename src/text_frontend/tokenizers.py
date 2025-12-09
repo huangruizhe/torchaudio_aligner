@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from typing import Optional, List, Union, Dict, Set
 import re
 import logging
-import unicodedata
 
 from .normalization import normalize_for_mms
 
@@ -35,71 +34,6 @@ except ImportError:
     _UNIDECODE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
-
-# ===========================================================================
-# Punctuation Detection Utilities
-# ===========================================================================
-
-# Characters that are pronounced (keep as content, not blank)
-DEFAULT_PRONOUNCED_PUNCT = {
-    "$", "%", "&", "@", "#", "+", "=", "/", "-",
-}
-
-# Extra characters to treat as unpronounced (zero-width, formatting)
-DEFAULT_EXTRA_UNPRONOUNCED = {
-    "\u200b",  # ZERO WIDTH SPACE
-    "\u200c",  # ZERO WIDTH NON-JOINER
-    "\u200d",  # ZERO WIDTH JOINER
-    "\u2060",  # WORD JOINER
-}
-
-
-def is_unpronounced_punct(
-    ch: str,
-    pronounced_punct: Set[str] = None,
-    extra_unpronounced: Set[str] = None,
-) -> bool:
-    """
-    Check if a character is punctuation that is NOT pronounced.
-
-    Args:
-        ch: Single character to check
-        pronounced_punct: Characters to keep even if they're punctuation
-        extra_unpronounced: Additional characters to treat as unpronounced
-
-    Returns:
-        True if the character should be treated as silent/blank
-    """
-    if not ch:
-        return False
-
-    if pronounced_punct is None:
-        pronounced_punct = DEFAULT_PRONOUNCED_PUNCT
-    if extra_unpronounced is None:
-        extra_unpronounced = DEFAULT_EXTRA_UNPRONOUNCED
-
-    # User explicitly wants this character pronounced
-    if ch in pronounced_punct:
-        return False
-
-    # Unicode punctuation categories (P*)
-    cat = unicodedata.category(ch)
-    if cat.startswith("P"):
-        return True
-
-    # Extra invisible/formatting characters
-    if ch in extra_unpronounced:
-        return True
-
-    return False
-
-
-def is_only_unpronounced_punct(word: str) -> bool:
-    """Check if a word consists entirely of unpronounced punctuation."""
-    if not word:
-        return True
-    return all(is_unpronounced_punct(ch) for ch in word)
 
 
 # ===========================================================================
@@ -291,10 +225,6 @@ class CharTokenizer(TokenizerInterface):
         - Accented chars → ASCII equivalents
         - Other Unicode → best ASCII approximation
 
-        Special handling for punctuation:
-        - Words that are ONLY unpronounced punctuation (., !, ?) -> blank_token
-        - Words with real content that becomes empty -> unk_token
-
         Args:
             word: Input word (may contain Unicode)
             unk_token: Token for empty result (default: self.unk_token)
@@ -304,10 +234,6 @@ class CharTokenizer(TokenizerInterface):
         """
         if unk_token is None:
             unk_token = self.unk_token
-
-        # Check if original word is only unpronounced punctuation BEFORE normalization
-        # If so, use blank (silence) instead of unk (unknown content)
-        original_is_punct_only = is_only_unpronounced_punct(word)
 
         # Step 1: ASCII transliteration (handles smart quotes, accents, etc.)
         if _UNIDECODE_AVAILABLE:
@@ -322,14 +248,7 @@ class CharTokenizer(TokenizerInterface):
         # Step 3: Keep only supported characters
         result = ''.join(c for c in word if c in self._supported_chars)
 
-        if result:
-            return result
-        elif original_is_punct_only:
-            # Pure punctuation -> blank (silence, no acoustic content)
-            return self.blank_token
-        else:
-            # Had real content but became empty -> unk (unknown)
-            return unk_token
+        return result if result else unk_token
 
     def _normalize_word(self, word: str) -> str:
         """Normalize a single word. Uses normalize_for_vocab internally."""
