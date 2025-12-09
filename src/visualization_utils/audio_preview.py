@@ -118,14 +118,26 @@ def play_segment(result, start_idx: int, num_words: int = 20, audio_file: str = 
     segment = audio[start_sec * 1000:end_sec * 1000]
 
     # Display info - show both original and normalized/romanized forms
-    original_text = " ".join(w.original if w.original else w.word for w in words)
-    normalized_text = " ".join(w.word for w in words)
+    # Align columns so original and romanized words line up vertically
+    original_words = [w.original if w.original else w.word for w in words]
+    normalized_words = [w.word for w in words]
 
-    print(f"Words {start_idx}-{end_idx-1} ({start_sec:.2f}s - {end_sec:.2f}s):")
-    print(f"  {original_text}")
-    # Only show normalized row if it differs from original (e.g., for non-Latin scripts)
-    if normalized_text != original_text:
-        print(f"  {normalized_text}")
+    # Check if we need to show both rows
+    show_normalized = original_words != normalized_words
+
+    if show_normalized:
+        # Calculate column widths to align words vertically
+        col_widths = [max(len(o), len(n)) for o, n in zip(original_words, normalized_words)]
+        original_aligned = " ".join(o.ljust(w) for o, w in zip(original_words, col_widths))
+        normalized_aligned = " ".join(n.ljust(w) for n, w in zip(normalized_words, col_widths))
+
+        print(f"Words {start_idx}-{end_idx-1} ({start_sec:.2f}s - {end_sec:.2f}s):")
+        print(f"  {original_aligned}")
+        print(f"  {normalized_aligned}")
+    else:
+        original_text = " ".join(original_words)
+        print(f"Words {start_idx}-{end_idx-1} ({start_sec:.2f}s - {end_sec:.2f}s):")
+        print(f"  {original_text}")
 
     return Audio(segment.get_array_of_samples(), rate=segment.frame_rate)
 
