@@ -100,7 +100,7 @@ def find_matching_k2_version(
         return None
 
 
-def install_k2_if_needed(verbose: bool = True) -> bool:
+def install_k2_if_needed(verbose: bool = True) -> None:
     """
     Check if k2 is available, if not, install the correct version.
 
@@ -110,15 +110,15 @@ def install_k2_if_needed(verbose: bool = True) -> bool:
     Args:
         verbose: Print progress messages
 
-    Returns:
-        True if k2 is available (already installed or newly installed)
+    Raises:
+        RuntimeError: If k2 installation fails
     """
     # Check if already installed
     if check_k2_installed():
         if verbose:
             version = get_k2_version()
             print(f"k2 already installed: {version}")
-        return True
+        return
 
     # Get system info
     torch_version, torch_major_minor, cuda_available, cuda_version = get_torch_info()
@@ -176,18 +176,19 @@ def install_k2_if_needed(verbose: bool = True) -> bool:
     if result.returncode == 0:
         if verbose:
             print("k2 installed successfully!")
-        return True
+        return
     else:
+        error_msg = f"k2 installation failed: {result.stderr}"
         if verbose:
-            print(f"Installation failed: {result.stderr}")
-        return False
+            print(f"ERROR: {error_msg}")
+        raise RuntimeError(error_msg)
 
 
 def install_other_deps(
     deps: Optional[List[str]] = None,
     quiet: bool = True,
     verbose: bool = True,
-) -> bool:
+) -> None:
     """
     Install other required dependencies.
 
@@ -196,8 +197,8 @@ def install_other_deps(
         quiet: Use pip's quiet mode (-q)
         verbose: Print progress messages
 
-    Returns:
-        True if all dependencies installed successfully
+    Raises:
+        RuntimeError: If any dependency installation fails
     """
     if deps is None:
         deps = [
@@ -208,11 +209,11 @@ def install_other_deps(
             "pypdf",
             "requests",
             "beautifulsoup4",
-            "torchcodec"
+            "torchcodec",
             "git+https://github.com/huangruizhe/lis.git",
         ]
 
-    all_success = True
+    failed_deps = []
     for dep in deps:
         try:
             cmd = [sys.executable, "-m", "pip", "install"]
@@ -223,17 +224,18 @@ def install_other_deps(
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
                 if verbose:
-                    print(f"Warning: Failed to install {dep}")
-                all_success = False
+                    print(f"ERROR: Failed to install {dep}: {result.stderr}")
+                failed_deps.append(dep)
         except Exception as e:
             if verbose:
-                print(f"Warning: Failed to install {dep}: {e}")
-            all_success = False
+                print(f"ERROR: Failed to install {dep}: {e}")
+            failed_deps.append(dep)
 
-    return all_success
+    if failed_deps:
+        raise RuntimeError(f"Failed to install dependencies: {', '.join(failed_deps)}")
 
 
-def install_ocr_deps(verbose: bool = True) -> bool:
+def install_ocr_deps(verbose: bool = True) -> None:
     """
     Install OCR dependencies (pytesseract, pdf2image).
 
@@ -244,8 +246,8 @@ def install_ocr_deps(verbose: bool = True) -> bool:
     Args:
         verbose: Print progress messages
 
-    Returns:
-        True if Python packages installed successfully
+    Raises:
+        RuntimeError: If installation fails
     """
     deps = ["pytesseract", "pdf2image"]
 
@@ -255,26 +257,26 @@ def install_ocr_deps(verbose: bool = True) -> bool:
         print("  Linux: apt install tesseract-ocr poppler-utils")
         print("  macOS: brew install tesseract poppler")
 
-    return install_other_deps(deps, quiet=True, verbose=verbose)
+    install_other_deps(deps, quiet=True, verbose=verbose)
 
 
-def install_romanization_deps(verbose: bool = True) -> bool:
+def install_romanization_deps(verbose: bool = True) -> None:
     """
     Install romanization dependencies for non-Latin scripts.
 
     Args:
         verbose: Print progress messages
 
-    Returns:
-        True if installed successfully
+    Raises:
+        RuntimeError: If installation fails
     """
     if verbose:
         print("Installing romanization dependencies...")
 
-    return install_other_deps(["uroman-python"], quiet=True, verbose=verbose)
+    install_other_deps(["uroman-python"], quiet=True, verbose=verbose)
 
 
-def install_all(verbose: bool = True) -> bool:
+def install_all(verbose: bool = True) -> None:
     """
     Install all dependencies (k2 + other deps).
 
@@ -283,30 +285,24 @@ def install_all(verbose: bool = True) -> bool:
     Args:
         verbose: Print progress messages
 
-    Returns:
-        True if all dependencies installed successfully
+    Raises:
+        RuntimeError: If any installation fails
     """
     if verbose:
         print("=" * 60)
         print("Installing torchaudio_aligner dependencies")
         print("=" * 60)
 
-    success = True
+    # Install k2 (raises RuntimeError on failure)
+    install_k2_if_needed(verbose=verbose)
 
-    # Install k2
-    if not install_k2_if_needed(verbose=verbose):
-        success = False
-
-    # Install other deps
+    # Install other deps (raises RuntimeError on failure)
     if verbose:
         print("\nInstalling other dependencies...")
-    if not install_other_deps(verbose=verbose):
-        success = False
+    install_other_deps(verbose=verbose)
 
     if verbose:
         print("\nDependency installation complete.")
-
-    return success
 
 
 # For convenience when running as script
