@@ -130,7 +130,14 @@ def align_long_audio(
         logger.info("Step 1: Loading audio...")
 
     if isinstance(audio, (str, Path)):
-        waveform, sample_rate = torchaudio.load(str(audio))
+        try:
+            waveform, sample_rate = torchaudio.load(str(audio))
+        except RuntimeError as e:
+            # torchcodec (default in torchaudio 2.6+) may fail on some files
+            # Fall back to soundfile backend
+            if verbose:
+                logger.info(f"  torchcodec failed, trying soundfile backend...")
+            waveform, sample_rate = torchaudio.load(str(audio), backend="soundfile")
         if verbose:
             logger.info(f"  File: {audio}")
             logger.info(f"  Original: {waveform.shape}, {sample_rate}Hz")
