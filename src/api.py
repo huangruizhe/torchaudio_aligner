@@ -130,14 +130,47 @@ def align_long_audio(
         logger.info("Step 1: Loading audio...")
 
     if isinstance(audio, (str, Path)):
-        try:
-            waveform, sample_rate = torchaudio.load(str(audio))
-        except RuntimeError as e:
-            # torchcodec (default in torchaudio 2.6+) may fail on some files
-            # Fall back to soundfile backend
-            if verbose:
-                logger.info(f"  torchcodec failed, trying soundfile backend...")
-            waveform, sample_rate = torchaudio.load(str(audio), backend="soundfile")
+        audio_path = str(audio)
+        waveform = None
+
+        # Try multiple backends in order of preference
+        backends_to_try = [None, "soundfile", "sox"]  # None = default (torchcodec)
+
+        for backend in backends_to_try:
+            try:
+                if backend is None:
+                    waveform, sample_rate = torchaudio.load(audio_path)
+                else:
+                    waveform, sample_rate = torchaudio.load(audio_path, backend=backend)
+                break  # Success
+            except Exception as e:
+                if verbose:
+                    backend_name = backend or "torchcodec"
+                    logger.info(f"  {backend_name} backend failed: {e}")
+                continue
+
+        # Last resort: use pydub (requires ffmpeg)
+        if waveform is None:
+            try:
+                if verbose:
+                    logger.info("  Trying pydub/ffmpeg fallback...")
+                from pydub import AudioSegment
+                import numpy as np
+
+                audio_seg = AudioSegment.from_file(audio_path)
+                # Convert to mono and get samples
+                audio_seg = audio_seg.set_channels(1)
+                samples = np.array(audio_seg.get_array_of_samples(), dtype=np.float32)
+                # Normalize to [-1, 1]
+                samples = samples / (2 ** (audio_seg.sample_width * 8 - 1))
+                waveform = torch.from_numpy(samples).unsqueeze(0)
+                sample_rate = audio_seg.frame_rate
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to load audio with all backends. "
+                    f"Try installing: pip install soundfile pydub, and apt-get install ffmpeg libsndfile1"
+                ) from e
+
         if verbose:
             logger.info(f"  File: {audio}")
             logger.info(f"  Original: {waveform.shape}, {sample_rate}Hz")
