@@ -704,6 +704,34 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return "\n".join(lines)
 
     # -------------------------------------------------------------------------
+    # Audio Playback
+    # -------------------------------------------------------------------------
+
+    def play(self, index: int, num_words: int = 1):
+        """
+        Play aligned word(s) from the audio.
+
+        Args:
+            index: Word index to start from (0-based)
+            num_words: Number of words to play (default 1 for single word)
+
+        Returns:
+            IPython.display.Audio object for playback in notebooks
+
+        Example:
+            >>> result.play(85)           # Play word at index 85
+            >>> result.play(85, 10)       # Play 10 words starting at index 85
+        """
+        from visualization_utils import play_word, play_segment
+
+        if num_words == 1:
+            # Single word
+            return play_word(self, index)
+        else:
+            # Multiple words
+            return play_segment(self, index, num_words=num_words)
+
+    # -------------------------------------------------------------------------
     # Interactive Demo
     # -------------------------------------------------------------------------
 
