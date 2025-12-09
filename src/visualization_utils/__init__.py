@@ -20,6 +20,11 @@ Usage:
     )
 """
 
+# Suppress pydub SyntaxWarning about invalid escape sequences in Python 3.12+
+# This is a known issue in pydub: https://github.com/jiaaro/pydub/issues/755
+import warnings
+warnings.filterwarnings("ignore", category=SyntaxWarning, module="pydub")
+
 from .audacity import (
     get_audacity_labels,
     save_audacity_labels,
