@@ -414,6 +414,7 @@ def align_long_audio(
         text_normalized,
         original_text_words,
         tokenizer,
+        frame_duration=frame_duration,
     )
 
     # Convert dict to sorted list

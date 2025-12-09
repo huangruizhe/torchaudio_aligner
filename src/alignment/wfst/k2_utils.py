@@ -581,6 +581,7 @@ def get_final_word_alignment(
     text: str,
     original_text_words: List[str],
     tokenizer,
+    frame_duration: float = 0.02,
 ) -> Dict[int, AlignedWord]:
     """
     Convert token-level alignment to word-level alignment (follows Tutorial.py pattern).
@@ -588,11 +589,17 @@ def get_final_word_alignment(
     Groups consecutive tokens by word index and creates AlignedWord objects
     with start_frame/end_frame (in FRAMES). Call start_seconds()/end_seconds() for seconds.
 
+    Word end time logic:
+    - If next word starts within max_word_duration, end_time = next_word_start
+    - Otherwise, estimate based on per-token duration statistics
+    - Fallback to default_word_duration if no statistics available (e.g., for "*" tokens)
+
     Args:
         alignment_results: List of AlignedToken from concat_alignments
         text: Normalized text (space-separated words)
         original_text_words: Original (non-normalized) words for display
         tokenizer: Tokenizer with id2token mapping (or similar interface)
+        frame_duration: Duration of each frame in seconds (default 0.02 for MMS)
 
     Returns:
         Dict mapping word index (int) to AlignedWord object.
@@ -632,17 +639,27 @@ def get_final_word_alignment(
 
     # Second pass: compute end_frames
     sorted_indices = sorted(word_data.keys())
-    max_word_frames = 50
-    min_word_frames = 5
-    default_frames_per_char = 2.5
 
-    # Estimate average frames per character
+    # Define duration constants in SECONDS, then convert to frames
+    MAX_WORD_DURATION_SEC = 0.5       # Cap word duration at 0.5 seconds
+    MIN_WORD_DURATION_SEC = 0.06      # Minimum word duration (3 frames at 20ms)
+    DEFAULT_WORD_DURATION_SEC = 0.3   # Fallback for unknown tokens (e.g., "*")
+    DEFAULT_CHAR_DURATION_SEC = 0.05  # ~50ms per character fallback
+
+    # Convert to frames
+    max_word_frames = int(MAX_WORD_DURATION_SEC / frame_duration)
+    min_word_frames = int(MIN_WORD_DURATION_SEC / frame_duration)
+    default_word_frames = int(DEFAULT_WORD_DURATION_SEC / frame_duration)
+    default_frames_per_char = DEFAULT_CHAR_DURATION_SEC / frame_duration
+
+    # Estimate average frames per character from actual data
     char_durations = []
     for i in range(len(sorted_indices) - 1):
         idx = sorted_indices[i]
         next_idx = sorted_indices[i + 1]
         duration = word_data[next_idx]["start_frame"] - word_data[idx]["start_frame"]
         word_text = text_splitted[idx]
+        # Only use reasonable durations for statistics
         if word_text and 0 < duration <= max_word_frames:
             char_durations.append(duration / len(word_text))
 
@@ -657,14 +674,24 @@ def get_final_word_alignment(
             next_start = word_data[sorted_indices[i + 1]]["start_frame"]
             gap = next_start - start_frame
             if gap <= max_word_frames:
+                # Next word is close enough, use its start as our end
                 word_data[idx]["end_frame"] = next_start
             else:
-                estimated = int(len(word_text) * avg_frames_per_char) if word_text else min_word_frames
-                estimated = max(min_word_frames, min(estimated, max_word_frames))
+                # Gap too large, estimate based on token count
+                if word_text and word_text != "*":
+                    estimated = int(len(word_text) * avg_frames_per_char)
+                    estimated = max(min_word_frames, min(estimated, max_word_frames))
+                else:
+                    # Unknown token or empty, use default
+                    estimated = default_word_frames
                 word_data[idx]["end_frame"] = start_frame + estimated
         else:
-            estimated = int(len(word_text) * avg_frames_per_char) if word_text else min_word_frames
-            estimated = max(min_word_frames, min(estimated, max_word_frames))
+            # Last word, estimate duration
+            if word_text and word_text != "*":
+                estimated = int(len(word_text) * avg_frames_per_char)
+                estimated = max(min_word_frames, min(estimated, max_word_frames))
+            else:
+                estimated = default_word_frames
             word_data[idx]["end_frame"] = start_frame + estimated
 
     # Third pass: build AlignedWord objects
