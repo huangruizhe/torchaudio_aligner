@@ -909,7 +909,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # Convert to int16 for WAV
             audio_np = segment_waveform.squeeze(0).numpy()
             audio_int16 = (audio_np * 32767).astype('int16')
-            wavfile.write(buffer, sample_rate, audio_int16)
+            wavfile.write(buffer, int(sample_rate), audio_int16)
         except ImportError:
             # Fallback: use temporary file
             import tempfile
