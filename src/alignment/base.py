@@ -840,21 +840,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if "language" in self.metadata:
                 title = f"{title} ({self.metadata['language']})"
 
-        # Get words in range
+        # Get words in range (using position in result.words, same as play())
         if end_idx is None:
             end_idx = len(self.words)
-        words_subset = [w for w in self.words if start_idx <= w.index < end_idx]
+        end_idx = min(end_idx, len(self.words))
+        start_idx = max(0, start_idx)
+        words_subset = self.words[start_idx:end_idx]
 
         # Build word data
         words_data = []
-        for w in words_subset:
+        for i, w in enumerate(words_subset, start=start_idx):
             display_text = w.original if w.original else w.word
             words_data.append({
                 "word": display_text,
-                "index": w.index,
+                "position": i,  # Position in result.words (for play())
                 "start": w.start_seconds(),
                 "end": w.end_seconds(),
             })
+
+        if not words_data:
+            raise ValueError(f"No words in range [{start_idx}, {end_idx})")
 
         # Read and base64 encode audio
         with open(audio_file, "rb") as f:
@@ -879,7 +884,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             <h2 style="color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px;">{title}</h2>
 
             <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                <strong>Words:</strong> {len(words_data)} |
+                <strong>Words:</strong> {start_idx}-{end_idx-1} ({len(words_data)} words) |
                 <strong>Time:</strong> {words_data[0]['start']:.2f}s - {words_data[-1]['end']:.2f}s
             </div>
 
