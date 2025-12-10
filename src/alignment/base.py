@@ -861,14 +861,53 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not words_data:
             raise ValueError(f"No words in range [{start_idx}, {end_idx})")
 
-        # Read and base64 encode audio
-        with open(audio_file, "rb") as f:
-            audio_b64 = base64.b64encode(f.read()).decode("ascii")
+        # Extract only the audio segment for the displayed words
+        segment_start = words_data[0]['start']
+        segment_end = words_data[-1]['end']
 
-        # Detect audio type
-        audio_ext = str(audio_file).rsplit(".", 1)[-1].lower()
-        mime_types = {"mp3": "audio/mpeg", "wav": "audio/wav", "ogg": "audio/ogg", "m4a": "audio/mp4"}
-        mime_type = mime_types.get(audio_ext, "audio/mpeg")
+        # Add small padding for context (0.1s before, 0.2s after)
+        padding_before = 0.1
+        padding_after = 0.2
+        segment_start_padded = max(0, segment_start - padding_before)
+        segment_end_padded = segment_end + padding_after
+
+        # Load audio and extract segment
+        import io
+        import torchaudio
+
+        try:
+            waveform, sample_rate = torchaudio.load(audio_file)
+        except Exception:
+            # Fallback for formats torchaudio can't handle
+            try:
+                from pydub import AudioSegment
+                audio_seg = AudioSegment.from_file(audio_file)
+                sample_rate = audio_seg.frame_rate
+                samples = torch.tensor(audio_seg.get_array_of_samples()).float()
+                if audio_seg.channels == 2:
+                    samples = samples.view(-1, 2).mean(dim=1)
+                waveform = samples.unsqueeze(0) / 32768.0
+            except ImportError:
+                raise RuntimeError("Could not load audio. Install pydub: pip install pydub")
+
+        # Extract segment
+        start_sample = int(segment_start_padded * sample_rate)
+        end_sample = int(segment_end_padded * sample_rate)
+        end_sample = min(end_sample, waveform.shape[1])
+        segment_waveform = waveform[:, start_sample:end_sample]
+
+        # Adjust word timestamps relative to segment start
+        time_offset = segment_start_padded
+        for w in words_data:
+            w['start'] = w['start'] - time_offset
+            w['end'] = w['end'] - time_offset
+
+        # Encode segment as WAV in memory
+        buffer = io.BytesIO()
+        torchaudio.save(buffer, segment_waveform, sample_rate, format="wav")
+        buffer.seek(0)
+        audio_b64 = base64.b64encode(buffer.read()).decode("ascii")
+        mime_type = "audio/wav"
         audio_data_url = f"data:{mime_type};base64,{audio_b64}"
 
         # Generate word spans
@@ -878,6 +917,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             word_spans.append(span)
         words_html = " ".join(word_spans)
 
+        # Calculate segment duration for display
+        segment_duration = segment_end_padded - segment_start_padded
+
         # Build HTML with embedded audio
         html = f"""
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px;">
@@ -885,7 +927,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                 <strong>Words:</strong> {start_idx}-{end_idx-1} ({len(words_data)} words) |
-                <strong>Time:</strong> {words_data[0]['start']:.2f}s - {words_data[-1]['end']:.2f}s
+                <strong>Original time:</strong> {segment_start:.2f}s - {segment_end:.2f}s |
+                <strong>Segment:</strong> {segment_duration:.2f}s
             </div>
 
             <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
