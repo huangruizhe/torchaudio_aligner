@@ -902,9 +902,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             w['start'] = w['start'] - time_offset
             w['end'] = w['end'] - time_offset
 
-        # Encode segment as WAV in memory
+        # Encode segment as WAV in memory using scipy (torchaudio doesn't support BytesIO with TorchCodec)
         buffer = io.BytesIO()
-        torchaudio.save(buffer, segment_waveform, sample_rate, format="wav")
+        try:
+            from scipy.io import wavfile
+            # Convert to int16 for WAV
+            audio_np = segment_waveform.squeeze(0).numpy()
+            audio_int16 = (audio_np * 32767).astype('int16')
+            wavfile.write(buffer, sample_rate, audio_int16)
+        except ImportError:
+            # Fallback: use temporary file
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                torchaudio.save(tmp_path, segment_waveform, sample_rate)
+                with open(tmp_path, "rb") as f:
+                    buffer = io.BytesIO(f.read())
+            finally:
+                os.unlink(tmp_path)
         buffer.seek(0)
         audio_b64 = base64.b64encode(buffer.read()).decode("ascii")
         mime_type = "audio/wav"
