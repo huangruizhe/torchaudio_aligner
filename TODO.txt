@@ -10,6 +10,13 @@
 - use https://github.com/MahmoudAshraf97/ctc-forced-aligner as underlying alignment support
 - implement eval utils for research/engineering experiments
 - make it an annotation/inspection helper.
+- when speech has non-matched segments, we should distinguish this
+- code switching example
+- overlapped speech?
+- anchor timestamps (from Kevin Duh)
+- get recording in the demo (add to audio frontend)
+- multi-pass process
+- silence? junk? how did you define them?
 
 
 
