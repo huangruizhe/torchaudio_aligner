@@ -16,8 +16,6 @@ Note:
 
 from typing import Optional, List, Tuple
 import logging
-import tempfile
-import os
 
 import torch
 import torch.nn.functional as F
@@ -89,6 +87,8 @@ class OmniASRBackend(CTCModelBackend):
         self._pipeline = None
         self._model = None
         self._sp_model = None  # SentencePiece model for vocab
+        self._model_dtype = None
+        self._device_obj = None
 
     def load(self) -> None:
         """Load model from OmniASR."""
@@ -104,11 +104,18 @@ class OmniASRBackend(CTCModelBackend):
 
         logger.info(f"Loading OmniASR model: {model_name}")
 
-        # Create pipeline
-        self._pipeline = ASRInferencePipeline(model_card=model_name, device=device)
+        # Convert device string to torch.device
+        self._device_obj = torch.device(device)
+
+        # Create pipeline (handles model loading and setup)
+        self._pipeline = ASRInferencePipeline(model_card=model_name, device=self._device_obj)
 
         # Access the underlying model
         self._model = self._pipeline.model
+
+        # Get model dtype (usually bfloat16)
+        self._model_dtype = next(self._model.parameters()).dtype
+        logger.info(f"Model dtype: {self._model_dtype}")
 
         # Access the SentencePiece model for vocabulary
         self._sp_model = self._pipeline.tokenizer._model
@@ -190,8 +197,8 @@ class OmniASRBackend(CTCModelBackend):
         """
         Extract frame-wise log posteriors from audio.
 
-        Uses hook-based extraction to capture logits from the final projection
-        layer during model forward pass.
+        Uses direct model forward call with fairseq2's BatchLayout for
+        efficient batched inference.
 
         Args:
             waveform: Audio tensor (batch, samples) or (samples,)
@@ -204,160 +211,48 @@ class OmniASRBackend(CTCModelBackend):
         if not self._loaded:
             raise RuntimeError("Model not loaded. Call load() first.")
 
+        from fairseq2.nn import BatchLayout
+
         # Ensure batch dimension
         if waveform.dim() == 1:
             waveform = waveform.unsqueeze(0)
 
         batch_size = waveform.shape[0]
-        device = self.config.device
 
-        # Hook to capture logits from final_proj
-        captured = {}
+        # Move to device and convert to model dtype
+        waveform = waveform.to(self._device_obj, dtype=self._model_dtype)
 
-        def hook_fn(module, inp, out):
-            captured["logits"] = out
+        # Create lengths tensor if not provided
+        if lengths is None:
+            lengths = torch.full(
+                (batch_size,), waveform.shape[1],
+                dtype=torch.long, device=self._device_obj
+            )
+        else:
+            lengths = lengths.to(self._device_obj)
 
-        # Register hook on final projection layer
-        h = self._model.final_proj.register_forward_hook(hook_fn)
+        # Create BatchLayout for fairseq2 model
+        batch_layout = BatchLayout(
+            waveform.shape,
+            seq_lens=lengths,
+            device=self._device_obj,
+        )
 
-        try:
-            # Save waveform to temp file and use pipeline.transcribe
-            # This ensures proper preprocessing (resampling, normalization)
-            import torchaudio
+        # Forward pass
+        self._model.eval()
+        with torch.inference_mode():
+            logits, output_layout = self._model(waveform, batch_layout)
 
-            all_emissions = []
-            all_lengths = []
+        # Convert to log probabilities (use float32 for numerical stability)
+        emissions = F.log_softmax(logits.float(), dim=-1)
 
-            for i in range(batch_size):
-                # Get this sample's waveform
-                if lengths is not None:
-                    sample_len = lengths[i].item()
-                    sample_waveform = waveform[i, :sample_len]
-                else:
-                    sample_waveform = waveform[i]
-
-                # Ensure 2D for torchaudio.save
-                if sample_waveform.dim() == 1:
-                    sample_waveform = sample_waveform.unsqueeze(0)
-
-                # Save to temp file
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                    temp_path = f.name
-
-                try:
-                    # Move to CPU for saving
-                    torchaudio.save(temp_path, sample_waveform.cpu(), self.sample_rate)
-
-                    # Clear captured dict
-                    captured.clear()
-
-                    # Run transcription (this triggers the hook)
-                    with torch.inference_mode():
-                        _ = self._pipeline.transcribe([temp_path])
-
-                    # Get captured logits
-                    if "logits" in captured:
-                        logits = captured["logits"]
-                        emissions = F.log_softmax(logits.float(), dim=-1)
-                        all_emissions.append(emissions)
-                        all_lengths.append(emissions.shape[1])
-                    else:
-                        raise RuntimeError("Hook did not capture logits")
-
-                finally:
-                    # Clean up temp file
-                    if os.path.exists(temp_path):
-                        os.unlink(temp_path)
-
-            # Stack emissions (may have different lengths)
-            if len(all_emissions) == 1:
-                emissions = all_emissions[0]
-            else:
-                # Pad to max length
-                max_len = max(e.shape[1] for e in all_emissions)
-                padded = []
-                for e in all_emissions:
-                    if e.shape[1] < max_len:
-                        pad_size = max_len - e.shape[1]
-                        e = F.pad(e, (0, 0, 0, pad_size), value=float('-inf'))
-                    padded.append(e)
-                emissions = torch.cat(padded, dim=0)
-
-            emission_lengths = torch.tensor(all_lengths, dtype=torch.long, device=emissions.device)
-
-        finally:
-            h.remove()
-
-        # Add <star>/<unk> dimension if requested and not present
-        if self.config.with_star and self._vocab_info.unk_id is not None:
-            # Check if we need to add star dimension
-            # OmniASR already has unk at index 3, so we may not need to add it
-            pass
-
-        return emissions, emission_lengths
-
-    def get_emissions_direct(
-        self,
-        audio_paths: List[str],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Extract emissions directly from audio file paths.
-
-        This is more efficient than get_emissions() as it avoids
-        saving/loading temp files.
-
-        Args:
-            audio_paths: List of paths to audio files
-
-        Returns:
-            emissions: Log posteriors (batch, frames, vocab_size)
-            emission_lengths: Frame counts per batch item
-        """
-        if not self._loaded:
-            raise RuntimeError("Model not loaded. Call load() first.")
-
-        # Hook to capture logits
-        captured = {}
-        all_emissions = []
-        all_lengths = []
-
-        def hook_fn(module, inp, out):
-            captured["logits"] = out
-
-        h = self._model.final_proj.register_forward_hook(hook_fn)
-
-        try:
-            for audio_path in audio_paths:
-                captured.clear()
-
-                with torch.inference_mode():
-                    _ = self._pipeline.transcribe([audio_path])
-
-                if "logits" in captured:
-                    logits = captured["logits"]
-                    emissions = F.log_softmax(logits.float(), dim=-1)
-                    all_emissions.append(emissions)
-                    all_lengths.append(emissions.shape[1])
-                else:
-                    raise RuntimeError(f"Hook did not capture logits for {audio_path}")
-
-            # Stack/pad emissions
-            if len(all_emissions) == 1:
-                emissions = all_emissions[0]
-            else:
-                max_len = max(e.shape[1] for e in all_emissions)
-                padded = []
-                for e in all_emissions:
-                    if e.shape[1] < max_len:
-                        pad_size = max_len - e.shape[1]
-                        e = F.pad(e, (0, 0, 0, pad_size), value=float('-inf'))
-                    padded.append(e)
-                emissions = torch.cat(padded, dim=0)
-
-            emission_lengths = torch.tensor(all_lengths, dtype=torch.long, device=emissions.device)
-
-        finally:
-            h.remove()
+        # Extract output lengths from BatchLayout
+        output_seq_lens = output_layout.seq_lens
+        emission_lengths = torch.tensor(
+            [l.item() if hasattr(l, 'item') else l for l in output_seq_lens],
+            dtype=torch.long,
+            device=emissions.device,
+        )
 
         return emissions, emission_lengths
 
